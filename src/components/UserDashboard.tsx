@@ -82,11 +82,6 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
       <div className="bg-gradient-to-r from-sky-600 via-cyan-600 to-teal-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl shadow-cyan-900/10 mb-8 relative overflow-hidden">
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
-            <img
-              src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
-              alt={user?.displayName || 'المستخدم'}
-              className="w-16 h-16 rounded-2xl object-cover border-2 border-white/40 shadow-md"
-            />
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl sm:text-2xl font-black">{user?.displayName || 'المستخدم'}</h1>
