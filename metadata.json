@@ -1,0 +1,6 @@
+{
+  "name": "مكتبة العلوم الرقمية - مدرسة محلاح للبنات",
+  "description": "منصة تعليمية رقمية للموارد العلمية التفاعلية لمدرسة محلاح للبنات (5–12) - تصميم: جواهر المعمرية",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

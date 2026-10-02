@@ -1,0 +1,115 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile with role-based access for school science library",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["user", "reviewer", "admin"] },
+        "school": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["id", "displayName", "email", "role"]
+    },
+    "Resource": {
+      "title": "Educational Resource",
+      "description": "Scientific educational resource item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 500 },
+        "fileUrl": { "type": "string", "maxLength": 500 },
+        "fileName": { "type": "string", "maxLength": 200 },
+        "resourceType": { "type": "string", "maxLength": 80 },
+        "gradeId": { "type": "string", "maxLength": 50 },
+        "gradeName": { "type": "string", "maxLength": 100 },
+        "subjectId": { "type": "string", "maxLength": 50 },
+        "subjectName": { "type": "string", "maxLength": 100 },
+        "curriculum": { "type": "string", "maxLength": 100 },
+        "unit": { "type": "string", "maxLength": 150 },
+        "topic": { "type": "string", "maxLength": 150 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["draft", "submitted", "under_review", "approved", "published", "rejected", "needs_revision"] },
+        "version": { "type": "string", "maxLength": 20 },
+        "tags": { "type": "array" },
+        "ratingAverage": { "type": "number" },
+        "ratingCount": { "type": "number" },
+        "usageCount": { "type": "number" },
+        "htmlContent": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "publishedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "resourceType", "gradeId", "subjectId", "authorId", "status"]
+    },
+    "Review": {
+      "title": "Resource Review",
+      "description": "Review record for submitted resources",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "reviewerId": { "type": "string", "maxLength": 128 },
+        "reviewerName": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["approved", "needs_revision", "rejected"] },
+        "comment": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "resourceId", "reviewerId", "status", "createdAt"]
+    },
+    "Favorite": {
+      "title": "Favorite Resource",
+      "description": "User bookmarked educational resource",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "resourceId"]
+    },
+    "Rating": {
+      "title": "Resource Rating",
+      "description": "1 to 5 star rating given by a user to a published resource",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "score": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "resourceId", "score"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and RBAC assignment"
+    },
+    "/resources/{resourceId}": {
+      "schema": { "$ref": "#/entities/Resource" },
+      "description": "Educational science resources catalog"
+    },
+    "/resources/{resourceId}/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/Review" },
+      "description": "Review actions and feedback logs"
+    },
+    "/favorites/{favoriteId}": {
+      "schema": { "$ref": "#/entities/Favorite" },
+      "description": "User bookmarked resources"
+    },
+    "/ratings/{ratingId}": {
+      "schema": { "$ref": "#/entities/Rating" },
+      "description": "Ratings provided by users"
+    }
+  }
+}
