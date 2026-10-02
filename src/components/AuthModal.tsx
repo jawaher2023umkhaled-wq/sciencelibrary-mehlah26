@@ -54,11 +54,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           setIsLoading(false);
           return;
         }
-        await register(displayName, email);
+        const res = await register(displayName, email, password);
+        if (res.error) {
+          setErrorMsg(res.error);
+          return;
+        }
         showToast('تم إنشاء الحساب بنجاح وتم تسجيل دخولك.', 'success');
         onClose();
       } else {
-        await login(email, undefined, displayName);
+        const res = await login(email, password, undefined, displayName);
+        if (res.error) {
+          setErrorMsg(res.error);
+          return;
+        }
         showToast('تم تسجيل الدخول بنجاح.', 'success');
         onClose();
       }
@@ -74,7 +82,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setIsLoading(true);
     try {
       await googleSignIn();
-      showToast('تم تسجيل الدخول باستخدام حساب Google بنجاح.', 'success');
+      showToast('تم توجيه تسجيل الدخول بحساب Google بنجاح.', 'success');
       onClose();
     } catch (e) {
       showToast('تعذر تسجيل الدخول بحساب Google. يرجى التحقق من الاتصال.', 'error');
@@ -82,21 +90,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Quick 1-click test profile helpers
-  const handleQuickLogin = (roleType: 'admin' | 'reviewer' | 'user') => {
-    if (roleType === 'admin') {
-      login('sciencelibrary8@gmail.com', 'administrator', 'مدير مكتبة العلوم الرقمية');
-      showToast('تم تسجيل الدخول كمدير نظام (sciencelibrary8@gmail.com)', 'success');
-    } else if (roleType === 'reviewer') {
-      login('reviewer@muhlah.edu.om', 'reviewer', 'المراجع الأكاديمي للعلوم');
-      showToast('تم تسجيل الدخول كـ مراجع أكاديمي', 'success');
-    } else {
-      login('teacher@muhlah.edu.om', 'user', 'عضو هيئة تدريس / مستخدم');
-      showToast('تم تسجيل الدخول كمستخدم (User)', 'success');
-    }
-    onClose();
   };
 
   return (
@@ -117,41 +110,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             <Sparkles className="w-6 h-6" />
           </div>
           <h3 className="text-xl font-bold text-slate-900">
-            {mode === 'register' ? 'إنشاء حساب جديد' : mode === 'forgot_password' ? 'استعادة كلمة المرور' : 'تسجيل الدخول للمنصة'}
+            {mode === 'register' ? 'إنشاء حساب جديد' : mode === 'forgot_password' ? 'استعادة كلمة المرور' : 'تسجيل الدخول للمنصة (Supabase)'}
           </h3>
           <p className="text-xs text-slate-500 mt-1">
             مكتبة العلوم الرقمية - مدرسة محلاح للبنات (5–12)
           </p>
-        </div>
-
-        {/* Quick Testing Profiles Bar */}
-        <div className="mb-5 p-3 bg-slate-50 rounded-2xl border border-slate-100">
-          <span className="text-[11px] font-bold text-slate-600 block mb-2 text-center">
-            ⚡ اختيار حساب سريع للتجربة والتحقق:
-          </span>
-          <div className="grid grid-cols-3 gap-1.5 text-xs">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin')}
-              className="py-1.5 px-2 rounded-xl bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 font-bold transition-colors cursor-pointer text-center"
-            >
-              مدير النظام
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('reviewer')}
-              className="py-1.5 px-2 rounded-xl bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 font-bold transition-colors cursor-pointer text-center"
-            >
-              المراجع
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('user')}
-              className="py-1.5 px-2 rounded-xl bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 font-bold transition-colors cursor-pointer text-center"
-            >
-              مستخدم
-            </button>
-          </div>
         </div>
 
         {/* Google Sign-in Button */}
@@ -188,7 +151,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-slate-200"></div>
               </div>
-              <span className="relative bg-white px-3 text-[11px] text-slate-400 font-semibold">أو بالبريد الإلكتروني</span>
+              <span className="relative bg-white px-3 text-[11px] text-slate-400 font-semibold">أو تسجيل الدخول اليدوي بالبريد وكلمة المرور</span>
             </div>
           </div>
         )}

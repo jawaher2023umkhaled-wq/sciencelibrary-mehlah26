@@ -18,7 +18,9 @@ import {
   Bell,
   Edit,
   RotateCcw,
-  Check
+  Check,
+  LogIn,
+  Lock
 } from 'lucide-react';
 
 interface UserDashboardProps {
@@ -26,13 +28,15 @@ interface UserDashboardProps {
   onLaunch: (res: ResourceItem) => void;
   onOpenInsertModal: () => void;
   onEditResource: (res: ResourceItem) => void;
+  onOpenAuthModal?: () => void;
 }
 
 export const UserDashboard: React.FC<UserDashboardProps> = ({
   onOpenDetails,
   onLaunch,
   onOpenInsertModal,
-  onEditResource
+  onEditResource,
+  onOpenAuthModal
 }) => {
   const { user } = useAuth();
   const {
@@ -74,6 +78,33 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     updateResource(res.id, { status: 'submitted' });
     showToast('تم إرسال المورد للمراجعة بنجاح', 'success');
   };
+
+  if (!user) {
+    return (
+      <div className="py-16 max-w-lg mx-auto px-4 text-center animate-in fade-in">
+        <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200/90 shadow-md space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center mx-auto shadow-xs">
+            <Lock className="w-8 h-8" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="text-xl font-bold text-slate-900">يتطلب تسجيل الدخول</h2>
+            <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+              يرجى تسجيل الدخول إلى حسابك للوصول إلى لوحة الموارد الشخصية، ومتابعة حالة التحكيم، واستعراض قائمتك المفضلة.
+            </p>
+          </div>
+          {onOpenAuthModal && (
+            <button
+              onClick={onOpenAuthModal}
+              className="px-6 py-3 rounded-2xl bg-gradient-to-r from-sky-500 via-cyan-600 to-teal-600 hover:from-sky-600 hover:to-teal-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-sky-500/20 transition-all cursor-pointer inline-flex items-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>تسجيل الدخول للمنصة</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="py-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-in fade-in">
