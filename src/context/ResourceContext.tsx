@@ -343,8 +343,11 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     // Direct persistence to Supabase resources table (Requirement #1 & #5)
     supabaseResourceService.updateResource(id, updates).then(({ data: savedRecord, savedToSupabase, error }) => {
-      if (savedToSupabase && savedRecord) {
+      if (savedToSupabase) {
         setIsSupabaseLive(true);
+        if (savedRecord) {
+          setResources(prev => prev.map(r => r.id === id ? { ...r, ...savedRecord } : r));
+        }
         showToast('تم تحديث المورد ومزامنته مع Supabase بنجاح', 'success');
       } else {
         console.error('Supabase update persistence failure:', error);

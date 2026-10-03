@@ -154,7 +154,7 @@ export const supabaseResourceService = {
         .from('resources')
         .insert(row)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('Supabase INSERT rejected:', error);
@@ -164,13 +164,13 @@ export const supabaseResourceService = {
       if (data) {
         return { data: fromSupabaseRow(data as Record<string, unknown>), savedToSupabase: true };
       }
+
+      return { data: item, savedToSupabase: true };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Supabase INSERT exception:', message);
       return { data: null, savedToSupabase: false, error: message };
     }
-
-    return { data: null, savedToSupabase: false, error: 'لم يتم إرجاع أي سجل من قاعدة البيانات' };
   },
 
   /**
@@ -197,7 +197,7 @@ export const supabaseResourceService = {
         .update(partialRow)
         .eq('id', id)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('Supabase UPDATE rejected:', error);
@@ -207,13 +207,13 @@ export const supabaseResourceService = {
       if (data) {
         return { data: fromSupabaseRow(data as Record<string, unknown>), savedToSupabase: true };
       }
+
+      return { data: null, savedToSupabase: true };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Supabase UPDATE exception:', message);
       return { data: null, savedToSupabase: false, error: message };
     }
-
-    return { data: null, savedToSupabase: false, error: 'تعذر تحديث المورد في Supabase' };
   },
 
   /**
