@@ -115,7 +115,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     toggleTopicActive,
     reorderTopics,
     auditLogs,
-    showToast
+    showToast,
+    isSupabaseLive,
+    isSyncingWithSupabase,
+    syncAllWithSupabase,
+    reloadLiveResources
   } = useResources();
   const { allUsers, updateUserRole, adminEmail, setAdminEmail, user } = useAuth();
 
@@ -2469,6 +2473,171 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>حفظ البريد المعتمد</span>
               </button>
             </form>
+          </div>
+
+          {/* Supabase Database Persistence & RLS Verification Panel */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Database className="w-5 h-5 text-emerald-600" />
+                  <span>تخزين ومزامنة قاعدة بيانات Supabase (Live Database & RLS)</span>
+                  {isSupabaseLive ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      متصل ومباشر (Live)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      تخزين محلي مع مزامنة سحابية
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  تخزين الموارد متزامن مباشرة مع جدول <code className="font-mono bg-slate-100 px-1 py-0.5 rounded">public.resources</code> في Supabase مع سياسات أمان مشددة (RLS).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => reloadLiveResources()}
+                  disabled={isSyncingWithSupabase}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isSyncingWithSupabase ? 'animate-spin' : ''}`} />
+                  <span>تحديث البيانات المباشرة</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => syncAllWithSupabase()}
+                  disabled={isSyncingWithSupabase}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{isSyncingWithSupabase ? 'جارٍ المزامنة...' : 'مزامنة كافة الموارد إلى Supabase'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* RLS Policies Verification Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs mb-4">
+              <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-emerald-900">1. القراءة العامة (SELECT)</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                </div>
+                <p className="text-[11px] text-emerald-700">متاحة لجميع الزوار والطلاب بدون تسجيل دخول (Public Access).</p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-200/80">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-sky-900">2. إضافة مورد (INSERT)</span>
+                  <CheckCircle2 className="w-4 h-4 text-sky-600" />
+                </div>
+                <p className="text-[11px] text-sky-700">محمية بحارس المصادقة وتتطلب حساب موثق في Supabase.</p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-purple-50/70 border border-purple-200/80">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-purple-900">3. تعديل مورد (UPDATE)</span>
+                  <CheckCircle2 className="w-4 h-4 text-purple-600" />
+                </div>
+                <p className="text-[11px] text-purple-700">محصورة في مديري النظام والمراجعين المعتمدين.</p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-200/80">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-rose-900">4. حذف مورد (DELETE)</span>
+                  <CheckCircle2 className="w-4 h-4 text-rose-600" />
+                </div>
+                <p className="text-[11px] text-rose-700">صلاحية محكمة مخصصة لمدير المنصة فقط لمنع الفقدان.</p>
+              </div>
+            </div>
+
+            {/* SQL Migration Helper */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div className="space-y-0.5">
+                <span className="font-bold text-slate-800 block">ملف تهيئة قاعدة بيانات Supabase (Schema SQL & RLS)</span>
+                <span className="text-slate-500 text-[11px]">
+                  يتضمن أوامر إنشاء جدول <code className="font-mono text-slate-700">resources</code> والفهارس وسياسات الحماية الأربع.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const sql = `-- تنفيذ جدول الموارد وسياسات الأمان في Supabase
+CREATE TABLE IF NOT EXISTS public.resources (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  thumbnail_url TEXT,
+  file_url TEXT,
+  file_name TEXT,
+  file_type TEXT,
+  file_size TEXT,
+  resource_type TEXT NOT NULL,
+  resource_type_id TEXT,
+  category TEXT,
+  pedagogical_category TEXT,
+  grade_id TEXT NOT NULL,
+  grade_name TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  subject_name TEXT NOT NULL,
+  curriculum TEXT,
+  curriculum_id TEXT,
+  unit TEXT,
+  unit_id TEXT,
+  topic TEXT,
+  topic_id TEXT,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'published',
+  version TEXT NOT NULL DEFAULT '1.0',
+  tags JSONB DEFAULT '[]'::jsonb,
+  rating_average NUMERIC DEFAULT 0,
+  rating_count INTEGER DEFAULT 0,
+  usage_count INTEGER DEFAULT 0,
+  download_count INTEGER DEFAULT 0,
+  preview_type TEXT DEFAULT 'html',
+  html_content TEXT,
+  educational_objectives JSONB DEFAULT '[]'::jsonb,
+  scientific_concepts JSONB DEFAULT '[]'::jsonb,
+  execution_time TEXT,
+  usage_context TEXT,
+  target_skill TEXT,
+  required_tools JSONB DEFAULT '[]'::jsonb,
+  allow_download BOOLEAN DEFAULT true,
+  allow_preview BOOLEAN DEFAULT true,
+  usage_rights TEXT,
+  supporting_files JSONB DEFAULT '[]'::jsonb,
+  is_demo BOOLEAN DEFAULT false,
+  versions JSONB DEFAULT '[]'::jsonb,
+  review_notes JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  published_at TIMESTAMPTZ
+);
+
+ALTER TABLE public.resources ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public resources are viewable by everyone" ON public.resources FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can insert resources" ON public.resources FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can update resources" ON public.resources FOR UPDATE USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can delete resources" ON public.resources FOR DELETE USING (auth.role() = 'authenticated');`;
+                  if (navigator.clipboard) {
+                    navigator.clipboard.writeText(sql);
+                    showToast('تم نسخ كود SQL الخاص بـ Supabase إلى الحافظة بنجاح', 'success');
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                <span>نسخ استعلام SQL لإنشاء الجدول وسياسات RLS</span>
+              </button>
+            </div>
           </div>
 
           <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">

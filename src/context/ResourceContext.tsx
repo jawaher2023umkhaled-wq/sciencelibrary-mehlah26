@@ -13,6 +13,7 @@ import {
   AuditLogItem
 } from '../types';
 import { storageService } from '../services/storageService';
+import { supabaseResourceService } from '../services/supabaseResourceService';
 import { useAuth } from './AuthContext';
 
 export interface ToastMessage {
@@ -23,6 +24,10 @@ export interface ToastMessage {
 
 interface ResourceContextType {
   resources: ResourceItem[];
+  isSupabaseLive: boolean;
+  isSyncingWithSupabase: boolean;
+  reloadLiveResources: () => Promise<void>;
+  syncAllWithSupabase: () => Promise<number>;
   resourceTypes: ResourceTypeItem[];
   curricula: CurriculumItem[];
   units: UnitItem[];
@@ -133,6 +138,60 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [sandboxResource, setSandboxResource] = useState<ResourceItem | null>(null);
   const [isSandboxOpen, setIsSandboxOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isSupabaseLive, setIsSupabaseLive] = useState<boolean>(false);
+  const [isSyncingWithSupabase, setIsSyncingWithSupabase] = useState<boolean>(false);
+
+  // Requirement 3: Always fetch the latest live records directly from Supabase on platform load
+  const reloadLiveResources = async () => {
+    setIsSyncingWithSupabase(true);
+    try {
+      const { data, isLive } = await supabaseResourceService.fetchLiveResources();
+      if (isLive && data) {
+        if (data.length > 0) {
+          setResources(data);
+          storageService.saveResources(data);
+          setIsSupabaseLive(true);
+        } else {
+          // Table exists in Supabase but is empty -> seed local resources to Supabase
+          const localList = storageService.getResources();
+          if (localList.length > 0) {
+            await supabaseResourceService.syncBatchToSupabase(localList);
+            setResources(localList);
+            setIsSupabaseLive(true);
+          }
+        }
+      } else {
+        // Fallback to local storage if table is not yet migrated in Supabase
+        const list = storageService.getResources();
+        setResources(list);
+        setIsSupabaseLive(false);
+      }
+    } catch (e) {
+      console.warn('Supabase initial fetch notice:', e);
+      const list = storageService.getResources();
+      setResources(list);
+      setIsSupabaseLive(false);
+    } finally {
+      setIsSyncingWithSupabase(false);
+    }
+  };
+
+  const syncAllWithSupabase = async (): Promise<number> => {
+    setIsSyncingWithSupabase(true);
+    try {
+      const currentList = resources.length > 0 ? resources : storageService.getResources();
+      const res = await supabaseResourceService.syncBatchToSupabase(currentList);
+      if (res.count > 0) {
+        setIsSupabaseLive(true);
+        showToast(`تمت مزامنة وحفظ ${res.count} مورد بنجاح في جدول Supabase`, 'success');
+      } else if (res.error) {
+        showToast(`تنبيه Supabase: ${res.error} (يرجى تنفيذ ملف SQL في لوحة Supabase)`, 'warning');
+      }
+      return res.count;
+    } finally {
+      setIsSyncingWithSupabase(false);
+    }
+  };
 
   const refreshResources = () => {
     const list = storageService.getResources();
@@ -168,7 +227,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   useEffect(() => {
-    refreshResources();
+    reloadLiveResources();
     refreshResourceTypes();
     refreshCurriculum();
     refreshGradesAndSubjects();
@@ -262,24 +321,43 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const createResource = (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>) => {
     const created = storageService.createResource(resourceData);
-    refreshResources();
+    setResources(prev => [created, ...prev]);
     refreshNotifications();
-    if (created.status === 'submitted') {
-      showToast('تم إرسال المورد للمراجعة بنجاح', 'success');
-    } else {
-      showToast('تم حفظ المورد كمسودة بنجاح', 'success');
-    }
+
+    // Direct persistence to Supabase resources table (Requirement #1 & #5)
+    supabaseResourceService.createResource(created).then(({ savedToSupabase, error }) => {
+      if (savedToSupabase) {
+        setIsSupabaseLive(true);
+        showToast('تم حفظ المورد بنجاح في قاعدة بيانات Supabase', 'success');
+      } else {
+        console.warn('Supabase create persistence notice:', error);
+        showToast('تم حفظ المورد بنجاح', 'success');
+      }
+    });
+
     return created;
   };
 
   const updateResource = (id: string, updates: Partial<ResourceItem>) => {
     const updated = storageService.updateResource(id, updates);
-    refreshResources();
-    refreshNotifications();
-    if (activeResource && activeResource.id === id && updated) {
-      setActiveResource(updated);
+    if (updated) {
+      setResources(prev => prev.map(r => r.id === id ? updated : r));
+      if (activeResource && activeResource.id === id) {
+        setActiveResource(updated);
+      }
     }
-    showToast('تم تحديث بيانات المورد بنجاح', 'success');
+    refreshNotifications();
+
+    // Direct persistence to Supabase resources table (Requirement #1 & #5)
+    supabaseResourceService.updateResource(id, updates).then(({ savedToSupabase, error }) => {
+      if (savedToSupabase) {
+        setIsSupabaseLive(true);
+        showToast('تم تحديث المورد ومزامنته مع Supabase بنجاح', 'success');
+      } else {
+        console.warn('Supabase update persistence notice:', error);
+        showToast('تم تحديث بيانات المورد بنجاح', 'success');
+      }
+    });
   };
 
   const startReview = (id: string) => {
@@ -359,12 +437,21 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteResource = (id: string) => {
     storageService.deleteResource(id);
-    refreshResources();
+    setResources(prev => prev.filter(r => r.id !== id));
     refreshAuditLogs();
     if (activeResource && activeResource.id === id) {
       setActiveResource(null);
     }
-    showToast('تم حذف المورد بنجاح', 'info');
+
+    // Direct deletion from Supabase resources table (Requirement #1 & #5)
+    supabaseResourceService.deleteResource(id).then(({ deletedFromSupabase, error }) => {
+      if (deletedFromSupabase) {
+        showToast('تم حذف المورد من قاعدة بيانات Supabase بنجاح', 'info');
+      } else {
+        console.warn('Supabase delete persistence notice:', error);
+        showToast('تم حذف المورد بنجاح', 'info');
+      }
+    });
   };
 
   const uploadNewVersion = (resourceId: string, versionNumber: string, changeNotes: string, fileUrl?: string) => {
@@ -696,6 +783,10 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     <ResourceContext.Provider
       value={{
         resources,
+        isSupabaseLive,
+        isSyncingWithSupabase,
+        reloadLiveResources,
+        syncAllWithSupabase,
         resourceTypes,
         curricula,
         units,
