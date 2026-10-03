@@ -266,7 +266,7 @@ export const RESOURCE_TYPES: ResourceTypeItem[] = [
 
 export const INITIAL_RESOURCES: ResourceItem[] = [
   {
-    id: 'res-chem-metals-10',
+    id: 'ac015ece-0b9a-4221-8f85-615c47c1a9ec',
     title: 'محاكاة النشاط الكيميائي للفلزات',
     description: 'محاكاة تفاعلية لسلسلة النشاط الكيميائي؛ تتيح للطلاب اختبار تفاعل الفلزات المختلفة (بوتاسيوم، مغنيسيوم، خارصين، نحاس) مع حمض الهيدروكلوريك وملاحظة معدل تصاعد غاز الهيدروجين وشدة التفاعل.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80',
@@ -321,7 +321,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     ]
   },
   {
-    id: 'res-chem-rutherford-11',
+    id: '35153de9-30cf-4eb5-837a-07d81c3be351',
     title: 'تجربة رذرفورد على صفيحة الذهب',
     description: 'محاكاة فيزيائية كيميائية شهيرة لتجربة إرنست رذرفورد بقصف صفيحة الذهب بجسيمات ألفا، واكتشاف النواة الموجبة المركزية وتفسير الفراغ الهائل المحيط بها مع عدادات حية للانحراف والارتداد.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?auto=format&fit=crop&w=600&q=80',
@@ -370,7 +370,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     ]
   },
   {
-    id: 'res-bio-animal-cell-9',
+    id: '4779ff12-6087-4f6c-a968-451ee93db061',
     title: 'خلية الحيوان',
     description: 'درس تفاعلي واستكشافي لعضيات الخلية الحيوانية ووظائفها. يمكن للمتعلم النقر على أي جزء من أجزاء الخلية (النواة، الميتوكندريا، الشبكة الإندوبلازمية، جهاز جولجي، السيتوبلازم) لمعرفة تركيبه ودوره الحيوي.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1530026405186-ed1f139313f8?auto=format&fit=crop&w=600&q=80',
@@ -410,7 +410,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     publishedAt: '2026-09-18T10:30:00.000Z'
   },
   {
-    id: 'res-env-punnett-12',
+    id: 'eae5d3e2-37d5-4f05-9791-d5ae8e57dfd8',
     title: 'المربع القياسي والتنوع الحيوي',
     description: 'نشاط تفاعلي تطبيقي لحساب احتمالات مربع بانيت (Punnett Square) في الوراثة المندلية ودراسة تأثير الانعزال والتوزيع الحر على الحفاظ على التنوع الوراثي والبيولوجي في البيئات الطبيعية العمانية.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80',
@@ -450,7 +450,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     publishedAt: '2026-09-19T09:10:00.000Z'
   },
   {
-    id: 'res-phys-newton-9',
+    id: '224c2002-a9f3-4382-a52f-1dabc182a666',
     title: 'الحركة والقوى',
     description: 'درس تفاعلي ومختبر افتراضي لقانون نيوتن الثاني؛ يتيح للمتعلم التحكم بمقدار القوة المحصلة وكتلة العربة عبر مؤشرات منزلقة وحساب التسارع اللحظي ورؤية الحركة الناتجة بيانياً ومحسوساً.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1516339901601-2e1b62dc0c45?auto=format&fit=crop&w=600&q=80',
@@ -490,7 +490,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     publishedAt: '2026-09-14T15:30:00.000Z'
   },
   {
-    id: 'res-sci-water-cycle-7',
+    id: 'aa5b169d-da85-40a0-b170-c93bf5e59714',
     title: 'دورة الماء في الطبيعة والتضاريس العمانية',
     description: 'عرض تقديمي تفاعلي مع رسومات توضيحية تشرح مراحل دورة الماء (التبخر، التكاثف، الهطول، الجريان السطحي) وتطبيقها على مناخ سلطنة عمان والأودية والسدود.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=600&q=80',
@@ -529,7 +529,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     publishedAt: '2026-09-12T11:00:00.000Z'
   },
   {
-    id: 'res-bio-microscope-8',
+    id: '95569e0c-e69b-4c05-82d5-f4d740b023c6',
     title: 'المجهر الضوئي واستخداماته المخبرية',
     description: 'ورقة عمل واستقصاء علمي حول أجزاء المجهر الضوئي المركب وطريقة ضبط العدسات الشيئية والعينية لإعداد شريحة مجهرية لخلية نباتية وبصلية.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=600&q=80',
@@ -568,38 +568,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     publishedAt: '2026-09-14T09:00:00.000Z'
   },
   {
-    id: 'res-chem-acid-base-10',
-    title: 'معايرة الأحماض والقواعد ومقياس الرقم الهيدروجيني pH',
-    description: 'نشاط تفاعلي واختبار تحصيلي يقيس استيعاب الطلاب لمفهوم الرقم الهيدروجيني pH، واستخدام الكواشف الكيميائية (تباع الشمس، الفينولفثالين) والتمييز بين المحاليل الحمضية والقاعدية والمتعادلة.',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=600&q=80',
-    resourceType: 'اختبار',
-    resourceTypeId: 'quiz',
-    category: 'اختبار تحصيلي',
-    gradeId: 'grade-10',
-    gradeName: 'الصف العاشر',
-    subjectId: 'chemistry',
-    subjectName: 'الكيمياء',
-    curriculum: 'منهج سلطنة عمان',
-    curriculumId: 'curric-oman',
-    unit: 'الوحدة الثانية: التفاعلات الكيميائية',
-    unitId: 'unit-chem-10-reactions',
-    topic: 'سلسلة النشاط الكيميائي وتفاعلات الفلزات',
-    topicId: 'topic-metals-reactivity',
-    authorId: 'author-science-team',
-    authorName: 'قسم الكيمياء',
-    status: 'submitted',
-    version: 'الإصدار 1.0',
-    tags: ['أحماض وقواعد', 'pH', 'كيمياء عاشر', 'اختبار تفاعلي'],
-    ratingAverage: 0,
-    ratingCount: 0,
-    usageCount: 12,
-    downloadCount: 4,
-    previewType: 'document',
-    createdAt: '2026-09-27T10:00:00.000Z',
-    updatedAt: '2026-09-27T10:00:00.000Z'
-  },
-  {
-    id: 'res-phys-optics-11',
+    id: 'f5a88df2-751f-4ac6-8c87-c36630e1d198',
     title: 'انكسار الضوء والعدسات المحدبة والمقعرة',
     description: 'محاكاة لقوانين سنيل في انكسار الضوء وتكون الصور الحقيقية والتقديرية في العدسات والمرايا الكروية مع رسم المسارات الضوئية.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1509228468518-180dd4864904?auto=format&fit=crop&w=600&q=80',
@@ -629,7 +598,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     reviewNotes: [
       {
         id: 'rev-1',
-        resourceId: 'res-phys-optics-11',
+        resourceId: 'f5a88df2-751f-4ac6-8c87-c36630e1d198',
         reviewerId: 'reviewer-1',
         reviewerName: 'المراجع الأكاديمي',
         status: 'needs_revision',
@@ -641,7 +610,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     updatedAt: '2026-09-28T09:00:00.000Z'
   },
   {
-    id: 'res-unclassified-demo',
+    id: '59f58afc-1214-47b6-bde2-833f74fb3ee8',
     title: 'ورقة عمل استقصائية تجريبية (تحتاج تصنيف)',
     description: 'مورد تعليمي استرشادي بحاجة إلى استكمال ربطه بالصف والمادة والوحدة والموضوع لاختبار أداة تصنيف الموارد في لوحة الإدارة.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=600&q=80',
@@ -672,7 +641,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     updatedAt: '2026-09-29T12:00:00.000Z'
   },
   {
-    id: 'res-lab-titration-11',
+    id: 'b0d566a5-8109-435e-bde4-61edf57bf937',
     title: 'دليل إجراءات السلامة المخبرية وتجارب المعايرة الحجمية',
     description: 'دليل مخبري استرشادي متكامل يوضح قواعد الأمن والسلامة المهنية في مختبر الكيمياء، وإجراءات معايرة حمض الهيدروكلوريك مع هيدروكسيد الصوديوم بدقة مخبرية واستخدام كواشف التفاعل.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=600&q=80',
@@ -711,7 +680,7 @@ export const INITIAL_RESOURCES: ResourceItem[] = [
     publishedAt: '2026-09-22T08:00:00.000Z'
   },
   {
-    id: 'res-bio-dna-video-12',
+    id: '788a3116-660b-468f-bb18-c2e5c2f4f1b7',
     title: 'آلية تضاعف الحمض النووي DNA وبناء البروتينات',
     description: 'شرح مرئي وتعليمي ثلاثي الأبعاد يوضح خطوات تضاعف شريط DNA النصف محافظ، وعمل إنزيم بلمرة الحمض النووي، وآلية النسخ الوراثي إلى mRNA والترجمة على الريبوسوم.',
     thumbnailUrl: 'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?auto=format&fit=crop&w=600&q=80',

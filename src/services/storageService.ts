@@ -22,7 +22,7 @@ import {
   SUBJECTS
 } from '../data/initialData';
 
-import { generateUuid } from './supabaseResourceService';
+import { generateUuid, isValidUuid } from './supabaseResourceService';
 
 const STORAGE_KEY_RESOURCES = 'maktabat_aloloom_resources_v2';
 const STORAGE_KEY_FAVORITES = 'maktabat_aloloom_favorites_v2';
@@ -55,7 +55,25 @@ export const storageService = {
         this.saveResources(INITIAL_RESOURCES);
         return INITIAL_RESOURCES;
       }
-      const parsed: ResourceItem[] = JSON.parse(stored);
+      let parsed: ResourceItem[] = JSON.parse(stored);
+
+      // Purge res-chem-acid-base-10 completely from local state
+      let needsResave = false;
+      const originalCount = parsed.length;
+      parsed = parsed.filter(r => r.id !== 'res-chem-acid-base-10' && !r.title?.includes('معايرة الأحماض والقواعد ومقياس الرقم الهيدروجيني pH'));
+      if (parsed.length !== originalCount) {
+        needsResave = true;
+      }
+
+      // Convert any legacy non-UUID items in local storage to standard v4 UUIDs
+      parsed = parsed.map(r => {
+        if (!isValidUuid(r.id)) {
+          needsResave = true;
+          return { ...r, id: generateUuid() };
+        }
+        return r;
+      });
+
       let hasNew = false;
       for (const initial of INITIAL_RESOURCES) {
         if (!parsed.some(r => r.id === initial.id)) {
@@ -63,7 +81,7 @@ export const storageService = {
           hasNew = true;
         }
       }
-      if (hasNew) {
+      if (hasNew || needsResave) {
         this.saveResources(parsed);
       }
       return parsed;
@@ -1031,7 +1049,7 @@ export const storageService = {
             userId: 'system',
             actorName: 'نظام مكتبة العلوم الرقمية',
             action: 'create',
-            resourceId: 'res-chem-metals-10',
+            resourceId: 'ac015ece-0b9a-4221-8f85-615c47c1a9ec',
             resourceTitle: 'محاكاة النشاط الكيميائي للفلزات',
             timestamp: new Date().toISOString(),
             details: 'تهيئة المورد العلمي الاسترشادي في المكتبة'
