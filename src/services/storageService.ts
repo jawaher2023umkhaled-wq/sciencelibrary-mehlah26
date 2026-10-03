@@ -22,6 +22,8 @@ import {
   SUBJECTS
 } from '../data/initialData';
 
+import { generateUuid } from './supabaseResourceService';
+
 const STORAGE_KEY_RESOURCES = 'maktabat_aloloom_resources_v2';
 const STORAGE_KEY_FAVORITES = 'maktabat_aloloom_favorites_v2';
 const STORAGE_KEY_RATINGS = 'maktabat_aloloom_ratings_v2';
@@ -89,7 +91,7 @@ export const storageService = {
   // Create a new resource
   createResource(resource: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>): ResourceItem {
     const list = this.getResources();
-    const newId = 'res-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    const newId = generateUuid();
     const now = new Date().toISOString();
 
     const newResource: ResourceItem = {
@@ -1101,7 +1103,7 @@ export const storageService = {
     const existing = list.find(r => r.id === id);
     if (!existing) return null;
 
-    const newId = 'res-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    const newId = generateUuid();
     const now = new Date().toISOString();
 
     const duplicated: ResourceItem = {

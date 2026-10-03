@@ -145,31 +145,21 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const reloadLiveResources = async () => {
     setIsSyncingWithSupabase(true);
     try {
-      const { data, isLive } = await supabaseResourceService.fetchLiveResources();
-      if (isLive && data) {
-        if (data.length > 0) {
-          setResources(data);
-          storageService.saveResources(data);
-          setIsSupabaseLive(true);
-        } else {
-          // Table exists in Supabase but is empty -> seed local resources to Supabase
-          const localList = storageService.getResources();
-          if (localList.length > 0) {
-            await supabaseResourceService.syncBatchToSupabase(localList);
-            setResources(localList);
-            setIsSupabaseLive(true);
-          }
-        }
+      const { data, isLive, error } = await supabaseResourceService.fetchLiveResources();
+      if (isLive) {
+        // Real database records directly populate the UI (Requirement #1 & #3)
+        setResources(data);
+        storageService.saveResources(data);
+        setIsSupabaseLive(true);
       } else {
-        // Fallback to local storage if table is not yet migrated in Supabase
-        const list = storageService.getResources();
-        setResources(list);
+        console.error('Supabase fetch live error:', error);
         setIsSupabaseLive(false);
+        if (error) {
+          showToast(`تنبيه جلب البيانات من Supabase: ${error}`, 'error');
+        }
       }
     } catch (e) {
-      console.warn('Supabase initial fetch notice:', e);
-      const list = storageService.getResources();
-      setResources(list);
+      console.error('Supabase fetch exception:', e);
       setIsSupabaseLive(false);
     } finally {
       setIsSyncingWithSupabase(false);
@@ -321,17 +311,19 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const createResource = (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>) => {
     const created = storageService.createResource(resourceData);
-    setResources(prev => [created, ...prev]);
     refreshNotifications();
 
     // Direct persistence to Supabase resources table (Requirement #1 & #5)
-    supabaseResourceService.createResource(created).then(({ savedToSupabase, error }) => {
-      if (savedToSupabase) {
+    supabaseResourceService.createResource(created).then(({ data: savedRecord, savedToSupabase, error }) => {
+      if (savedToSupabase && savedRecord) {
+        setResources(prev => [savedRecord, ...prev.filter(r => r.id !== savedRecord.id)]);
         setIsSupabaseLive(true);
-        showToast('تم حفظ المورد بنجاح في قاعدة بيانات Supabase', 'success');
+        showToast('تم حفظ المورد بنجاح في قاعدة بيانات Supabase (UUID مسجل)', 'success');
       } else {
-        console.warn('Supabase create persistence notice:', error);
-        showToast('تم حفظ المورد بنجاح', 'success');
+        console.error('Supabase create persistence failure:', error);
+        // Do not mask database failure
+        setResources(prev => prev.filter(r => r.id !== created.id));
+        showToast(`فشل حفظ المورد في Supabase: ${error || 'يجب تسجيل الدخول كمدير نظام معتمد'}`, 'error');
       }
     });
 
@@ -339,6 +331,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const updateResource = (id: string, updates: Partial<ResourceItem>) => {
+    const previousResource = resources.find(r => r.id === id);
     const updated = storageService.updateResource(id, updates);
     if (updated) {
       setResources(prev => prev.map(r => r.id === id ? updated : r));
@@ -349,13 +342,17 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     refreshNotifications();
 
     // Direct persistence to Supabase resources table (Requirement #1 & #5)
-    supabaseResourceService.updateResource(id, updates).then(({ savedToSupabase, error }) => {
-      if (savedToSupabase) {
+    supabaseResourceService.updateResource(id, updates).then(({ data: savedRecord, savedToSupabase, error }) => {
+      if (savedToSupabase && savedRecord) {
         setIsSupabaseLive(true);
         showToast('تم تحديث المورد ومزامنته مع Supabase بنجاح', 'success');
       } else {
-        console.warn('Supabase update persistence notice:', error);
-        showToast('تم تحديث بيانات المورد بنجاح', 'success');
+        console.error('Supabase update persistence failure:', error);
+        // Revert on failure
+        if (previousResource) {
+          setResources(prev => prev.map(r => r.id === id ? previousResource : r));
+        }
+        showToast(`فشل تحديث المورد في Supabase: ${error || 'تحقق من الصلاحيات'}`, 'error');
       }
     });
   };
@@ -436,6 +433,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteResource = (id: string) => {
+    const previousResource = resources.find(r => r.id === id);
     storageService.deleteResource(id);
     setResources(prev => prev.filter(r => r.id !== id));
     refreshAuditLogs();
@@ -448,8 +446,11 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (deletedFromSupabase) {
         showToast('تم حذف المورد من قاعدة بيانات Supabase بنجاح', 'info');
       } else {
-        console.warn('Supabase delete persistence notice:', error);
-        showToast('تم حذف المورد بنجاح', 'info');
+        console.error('Supabase delete persistence failure:', error);
+        if (previousResource) {
+          setResources(prev => [...prev, previousResource]);
+        }
+        showToast(`فشل حذف المورد من Supabase: ${error || 'تحقق من الصلاحيات'}`, 'error');
       }
     });
   };

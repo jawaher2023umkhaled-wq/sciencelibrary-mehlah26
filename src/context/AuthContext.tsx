@@ -23,15 +23,25 @@ interface AuthContextType {
 const STORAGE_KEY_AUTH = 'maktabat_aloloom_current_user_v3';
 const STORAGE_KEY_USERS = 'maktabat_aloloom_registered_users_v3';
 
+export const OFFICIAL_ADMIN_EMAIL = 'sciencelibrary8@gmail.com';
+export const FORBIDDEN_ADMIN_EMAIL = 'jawaher2023umkhaled@gmail.com';
+
+export const isAuthorizedAdmin = (email?: string | null): boolean => {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  if (clean === FORBIDDEN_ADMIN_EMAIL) return false;
+  return clean === OFFICIAL_ADMIN_EMAIL;
+};
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [adminEmail, setAdminEmailState] = useState<string>(() => storageService.getAdminEmail());
+  const [adminEmail, setAdminEmailState] = useState<string>(() => OFFICIAL_ADMIN_EMAIL);
   // Default user state is strictly unauthenticated (null) on app initialization
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
 
-  // Stored registered accounts (without any hardcoded mock accounts)
+  // Stored registered accounts
   const [users, setUsers] = useState<UserProfile[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_USERS);
@@ -45,9 +55,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Map Supabase User or Session to Platform UserProfile
   const mapSupabaseUserToProfile = (authUser: { id: string; email?: string; user_metadata?: Record<string, unknown>; created_at?: string; last_sign_in_at?: string }): UserProfile => {
     const email = (authUser.email || '').trim().toLowerCase();
-    const isAdmin = email === adminEmail.toLowerCase();
+    const isAdmin = isAuthorizedAdmin(email);
     const metaRole = authUser.user_metadata?.role as UserRole | undefined;
-    const assignedRole: UserRole = isAdmin ? 'administrator' : (metaRole || 'user');
+    // Strict RBAC: only sciencelibrary8@gmail.com can be administrator
+    const assignedRole: UserRole = isAdmin ? 'administrator' : (metaRole === 'administrator' || metaRole === 'admin' ? 'user' : (metaRole || 'user'));
     const assignedDisplayName = (authUser.user_metadata?.displayName as string) || (authUser.user_metadata?.full_name as string) || (isAdmin ? 'مدير مكتبة العلوم الرقمية' : email.split('@')[0]);
 
     return {
@@ -166,65 +177,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Login via Supabase active authentication
-  const login = async (email: string, password?: string, role?: UserRole, displayName?: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (email: string, password?: string): Promise<{ success: boolean; error?: string }> => {
     const cleanEmail = email.trim().toLowerCase();
 
-    // 1. Attempt authentication with Supabase
+    if (!password) {
+      return { success: false, error: 'يرجى إدخال كلمة المرور' };
+    }
+
     try {
-      if (password) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password
-        });
-
-        if (error) {
-          console.warn('Supabase signInWithPassword:', error.message);
-          // If Supabase returns invalid credentials, provide clean error
-          if (error.message.includes('Invalid login credentials') || error.message.includes('Email not confirmed')) {
-            return { success: false, error: 'بيانات الدخول غير صحيحة، يرجى التأكد من البريد وكلمة المرور' };
-          }
-        } else if (data?.user) {
-          const profile = mapSupabaseUserToProfile(data.user);
-          setUser(profile);
-          localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(profile));
-          return { success: true };
-        }
-      }
-    } catch (err) {
-      console.warn('Supabase auth network attempt:', err);
-    }
-
-    // 2. Direct authentication verification
-    const isAdmin = cleanEmail === adminEmail.toLowerCase();
-    const assignedRole: UserRole = isAdmin ? 'administrator' : (role || 'user');
-    const assignedName = displayName || (isAdmin ? 'مدير مكتبة العلوم الرقمية' : cleanEmail.split('@')[0]);
-    
-    let existing = users.find(u => u.email.toLowerCase() === cleanEmail);
-
-    if (!existing) {
-      const newId = 'usr-' + Date.now();
-      existing = {
-        id: newId,
-        uid: newId,
-        displayName: assignedName,
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
-        role: assignedRole,
-        school: 'مدرسة محلاح للبنات (5–12)',
-        createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString()
-      };
-      setUsers(prev => [...prev, existing!]);
-    } else {
-      existing = {
-        ...existing,
-        lastLoginAt: new Date().toISOString()
-      };
-      setUsers(prev => prev.map(u => (u.id === existing!.id ? existing! : u)));
-    }
+        password
+      });
 
-    setUser(existing);
-    localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(existing));
-    return { success: true };
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data?.user) {
+        const profile = mapSupabaseUserToProfile(data.user);
+        setUser(profile);
+        localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(profile));
+        return { success: true };
+      }
+
+      return { success: false, error: 'تعذر الحصول على جلسة دخول نشطة من Supabase' };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
+    }
   };
 
   // Google Sign-In with Supabase
@@ -259,55 +240,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Register via Supabase
   const register = async (name: string, email: string, password?: string, school?: string): Promise<{ success: boolean; error?: string }> => {
     const cleanEmail = email.trim().toLowerCase();
-    const isAdmin = cleanEmail === adminEmail.toLowerCase();
+    const isAdmin = isAuthorizedAdmin(cleanEmail);
     const assignedRole: UserRole = isAdmin ? 'administrator' : 'user';
 
-    // 1. Attempt Supabase registration
-    try {
-      if (password) {
-        const { data, error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password,
-          options: {
-            data: {
-              displayName: name.trim(),
-              school: school || 'مدرسة محلاح للبنات (5–12)',
-              role: assignedRole
-            }
-          }
-        });
-
-        if (error) {
-          console.warn('Supabase signUp error:', error.message);
-        } else if (data?.user) {
-          const profile = mapSupabaseUserToProfile(data.user);
-          setUser(profile);
-          setUsers(prev => [...prev, profile]);
-          localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(profile));
-          return { success: true };
-        }
-      }
-    } catch (err) {
-      console.warn('Supabase signUp network attempt:', err);
+    if (!password || password.length < 6) {
+      return { success: false, error: 'يجب أن تتكون كلمة المرور من 6 أحرف أو أرقام على الأقل' };
     }
 
-    // 2. Direct secure registration
-    const newId = 'usr-' + Date.now();
-    const newUser: UserProfile = {
-      id: newId,
-      uid: newId,
-      displayName: name.trim(),
-      email: cleanEmail,
-      role: assignedRole,
-      school: school || 'مدرسة محلاح للبنات (5–12)',
-      createdAt: new Date().toISOString(),
-      lastLoginAt: new Date().toISOString()
-    };
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          data: {
+            displayName: name.trim(),
+            school: school || 'مدرسة محلاح للبنات (5–12)',
+            role: assignedRole
+          }
+        }
+      });
 
-    setUsers(prev => [...prev, newUser]);
-    setUser(newUser);
-    localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(newUser));
-    return { success: true };
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data?.session && data?.user) {
+        const profile = mapSupabaseUserToProfile(data.user);
+        setUser(profile);
+        localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(profile));
+        return { success: true };
+      } else if (data?.user) {
+        return {
+          success: true,
+          error: 'تم تسجيل الحساب بنجاح. إذا كان تأكيد البريد مفعلاً، يرجى مراجعة بريدك الإلكتروني.'
+        };
+      }
+
+      return { success: false, error: 'تعذر إنشاء الحساب في Supabase' };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
+    }
   };
 
   // Logout via Supabase

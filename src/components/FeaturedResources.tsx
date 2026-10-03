@@ -51,16 +51,22 @@ export const FeaturedResources: React.FC<FeaturedResourcesProps> = ({
         </div>
 
         {/* Resources Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {featured.map((resource) => (
-            <ResourceCard
-              key={resource.id}
-              resource={resource}
-              onOpenDetails={onOpenDetails}
-              onLaunch={onLaunch}
-            />
-          ))}
-        </div>
+        {featured.length === 0 ? (
+          <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 text-slate-500 text-xs">
+            بانتظار إضافة الموارد الأولى عبر لوحة الإدارة ليتم إبرازها هنا تلقائياً في قاعدة البيانات.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {featured.map((resource) => (
+              <ResourceCard
+                key={resource.id}
+                resource={resource}
+                onOpenDetails={onOpenDetails}
+                onLaunch={onLaunch}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

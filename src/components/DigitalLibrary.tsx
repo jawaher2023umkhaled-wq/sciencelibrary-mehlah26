@@ -26,7 +26,9 @@ import {
   FolderOpen,
   AlertCircle,
   PlusCircle,
-  Edit
+  Edit,
+  Database,
+  Plus
 } from 'lucide-react';
 
 interface DigitalLibraryProps {
@@ -626,7 +628,26 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({
       </div>
 
       {/* Main Results Display */}
-      {paginatedResources.length === 0 ? (
+      {resources.length === 0 ? (
+        <div className="bg-white rounded-3xl p-12 sm:p-16 text-center border border-slate-200 shadow-xs max-w-lg mx-auto">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4">
+            <Database className="w-8 h-8" />
+          </div>
+          <h3 className="text-base font-bold text-slate-800 mb-2">قاعدة بيانات Supabase متصلة ومباشرة (0 مورد حالياً)</h3>
+          <p className="text-xs text-slate-500 mb-6 leading-relaxed">
+            تم التحقق من الاتصال المباشر بجدول <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-700">public.resources</code>. يمكنك كمدير معتمد إضافة أول مورد تعليمي ليتم حفظه مباشرة في قاعدة البيانات.
+          </p>
+          {onOpenInsertModal && (
+            <button
+              onClick={onOpenInsertModal}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer inline-flex items-center gap-2 shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إدراج أول مورد تعليمي</span>
+            </button>
+          )}
+        </div>
+      ) : paginatedResources.length === 0 ? (
         <div className="bg-white rounded-3xl p-12 sm:p-16 text-center border border-slate-200 shadow-xs max-w-lg mx-auto">
           <div className="w-16 h-16 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center mx-auto mb-4">
             <BookOpen className="w-8 h-8" />
