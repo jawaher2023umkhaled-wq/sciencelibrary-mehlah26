@@ -18,9 +18,10 @@ import {
 
 interface LoginPageProps {
   onLoginSuccess: () => void;
+  onReturnHome?: () => void;
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onReturnHome }) => {
   const { login, register, googleSignIn, resetPassword } = useAuth();
   const { showToast } = useResources();
 
@@ -125,13 +126,28 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         </div>
 
         {/* Security / Route Protection Notice */}
-        <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-200/80 text-amber-900 text-xs flex items-center gap-2.5 shadow-2xs">
-          <Lock className="w-5 h-5 text-amber-600 shrink-0" />
-          <div className="leading-relaxed">
-            <span className="font-bold">منطقة محمية: </span>
-            يتطلب الوصول إلى موارد المنصة ولوحات الإدارة تسجيل دخول نشط ومعتمد عبر Supabase.
+        <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-200/80 text-amber-900 text-xs flex items-center justify-between gap-2.5 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <Lock className="w-5 h-5 text-amber-600 shrink-0" />
+            <div className="leading-relaxed">
+              <span className="font-bold">منطقة إدارة ومراجعة الموارد: </span>
+              يتطلب الدخول إلى لوحة الإدارة وإعدادات النظام ورفع الموارد تسجيل الدخول عبر Supabase.
+            </div>
           </div>
         </div>
+
+        {onReturnHome && (
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={onReturnHome}
+              className="text-xs text-sky-600 hover:text-sky-700 font-bold inline-flex items-center gap-1.5 hover:underline cursor-pointer bg-white px-4 py-2 rounded-xl border border-sky-100 shadow-2xs"
+            >
+              <span>العودة لتصفح المنصة والمكتبة العامة بدون تسجيل</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Auth Form Card */}
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl shadow-slate-200/50 relative text-right">

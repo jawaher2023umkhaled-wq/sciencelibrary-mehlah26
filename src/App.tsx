@@ -22,6 +22,9 @@ import { LoginPage } from './components/LoginPage';
 import { ResourceItem, isAdminRole } from './types';
 import { FlaskConical } from 'lucide-react';
 
+const ADMIN_ROUTES = ['admin', 'settings'];
+const AUTH_PROTECTED_ROUTES = ['admin', 'settings', 'review', 'my-resources', 'favorites'];
+
 const MainApp: React.FC = () => {
   const { user, isAuthenticated, isLoadingAuth, role } = useAuth();
   const {
@@ -41,12 +44,20 @@ const MainApp: React.FC = () => {
     showToast
   } = useResources();
 
+  // Robust SPA route resolution helper for direct refresh and browser history
+  const getTabFromPath = (pathname: string): string => {
+    const clean = pathname.replace(/^\/+|\/+$/g, '').toLowerCase().split('?')[0].split('#')[0];
+    if (!clean || clean === 'home') return 'home';
+    const validTabs = ['library', 'curriculum', 'grades', 'subjects', 'login', 'admin', 'settings', 'review', 'my-resources', 'favorites'];
+    if (validTabs.includes(clean)) {
+      return clean;
+    }
+    return 'home';
+  };
+
   // Navigation state initialized based on URL pathname
   const [currentTab, setCurrentTab] = useState<string>(() => {
-    const path = window.location.pathname.replace(/^\//, '');
-    if (path === 'login') return 'login';
-    if (path === 'library' || path === 'admin' || path === 'curriculum') return path;
-    return 'home';
+    return getTabFromPath(window.location.pathname);
   });
 
   const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
@@ -55,33 +66,37 @@ const MainApp: React.FC = () => {
 
   const publishedResources = resources.filter(r => r.status === 'published');
 
-  // Strict Supabase Auth Guard / Protected Routes
-  // Require active authentication via Supabase (supabase.auth.getSession()) before granting access to platform features.
-  // Unauthenticated users are redirected automatically to /login.
+  // Synchronize browser history (Back / Forward buttons) with currentTab
+  useEffect(() => {
+    const handlePopState = () => {
+      const targetTab = getTabFromPath(window.location.pathname);
+      setCurrentTab(targetTab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Route Protection & Auth Guard:
+  // Public pages (home, library, curriculum, grades, subjects) are COMPLETELY OPEN to all visitors and students.
+  // Redirect to /login ONLY when attempting to access restricted administrative or user dashboard features.
   useEffect(() => {
     if (!isLoadingAuth) {
-      if (!isAuthenticated || !user) {
-        if (currentTab !== 'login') {
-          setCurrentTab('login');
-          if (window.location.pathname !== '/login') {
-            window.history.replaceState(null, '', '/login');
-          }
-        }
-      } else {
-        if (currentTab === 'login') {
-          setCurrentTab('home');
-          if (window.location.pathname === '/login') {
-            window.history.replaceState(null, '', '/');
-          }
+      if ((!isAuthenticated || !user) && AUTH_PROTECTED_ROUTES.includes(currentTab)) {
+        showToast('يرجى تسجيل الدخول للوصول إلى لوحة الإدارة وإدارة الموارد', 'warning');
+        setCurrentTab('login');
+        if (window.location.pathname !== '/login') {
+          window.history.replaceState(null, '', '/login');
         }
       }
     }
   }, [isAuthenticated, user, isLoadingAuth, currentTab]);
 
-  // Protected Navigation handler
+  // Navigation handler
   const handleNavigate = (tab: string) => {
-    // Unauthenticated access guard
-    if (!isAuthenticated || !user) {
+    // 1. Strict Auth Guard on admin & private dashboard pages
+    if (AUTH_PROTECTED_ROUTES.includes(tab) && (!isAuthenticated || !user)) {
+      showToast('يرجى تسجيل الدخول للوصول إلى هذا القسم المحمي', 'warning');
       setCurrentTab('login');
       if (window.location.pathname !== '/login') {
         window.history.pushState(null, '', '/login');
@@ -89,13 +104,13 @@ const MainApp: React.FC = () => {
       return;
     }
 
-    // Role-protected route guard: Admin only
-    if ((tab === 'admin' || tab === 'settings') && !isAdminRole(role)) {
+    // 2. Strict Role Guard: Admin only
+    if (ADMIN_ROUTES.includes(tab) && !isAdminRole(role)) {
       showToast('منطقة محمية: هذا القسم مخصص لمدير النظام فقط', 'error');
       return;
     }
 
-    // Role-protected route guard: Reviewer & Admin only
+    // 3. Strict Role Guard: Reviewer or Admin only
     if (tab === 'review' && !(role === 'reviewer' || isAdminRole(role))) {
       showToast('منطقة محمية: هذا القسم مخصص للمراجع الأكاديمي', 'error');
       return;
@@ -109,35 +124,26 @@ const MainApp: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Public navigation shortcuts (accessible to anyone)
   const handleSelectGrade = (gradeId: string) => {
-    if (!isAuthenticated || !user) {
-      handleNavigate('login');
-      return;
-    }
     setFilters({ gradeId });
     handleNavigate('library');
   };
 
   const handleSelectSubject = (subjectId: string) => {
-    if (!isAuthenticated || !user) {
-      handleNavigate('login');
-      return;
-    }
     setFilters({ subjectId });
     handleNavigate('library');
   };
 
   const handleSearchFromHero = (query: string) => {
-    if (!isAuthenticated || !user) {
-      handleNavigate('login');
-      return;
-    }
     setFilters({ searchQuery: query });
     handleNavigate('library');
   };
 
+  // Resource Insertion / Editing Guard (Requires Auth)
   const handleOpenInsert = () => {
     if (!isAuthenticated || !user) {
+      showToast('يرجى تسجيل الدخول لإدراج موارد تعليمية جديدة', 'info');
       handleNavigate('login');
       return;
     }
@@ -147,6 +153,7 @@ const MainApp: React.FC = () => {
 
   const handleEditResource = (resource: ResourceItem) => {
     if (!isAuthenticated || !user) {
+      showToast('يرجى تسجيل الدخول لتعديل الموارد التعليمية', 'info');
       handleNavigate('login');
       return;
     }
@@ -154,7 +161,7 @@ const MainApp: React.FC = () => {
     setIsInsertModalOpen(true);
   };
 
-  // Auth Initialization Spinner
+  // Auth Initialization Spinner (Only shown briefly on first session check)
   if (isLoadingAuth) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 font-['Cairo',sans-serif] text-slate-800">
@@ -164,7 +171,7 @@ const MainApp: React.FC = () => {
           </div>
           <div className="space-y-1">
             <h3 className="text-lg font-bold text-slate-900">مكتبة العلوم الرقمية</h3>
-            <p className="text-xs text-slate-500">جارٍ التحقق من مصادقة Supabase النشطة...</p>
+            <p className="text-xs text-slate-500">مدرسة محلاح للبنات (5–12)...</p>
           </div>
         </div>
       </div>
@@ -177,7 +184,7 @@ const MainApp: React.FC = () => {
       {/* Toast Notifications */}
       <NotificationToast />
 
-      {/* Top Navbar */}
+      {/* Top Navbar (Always accessible) */}
       <Navbar
         currentTab={currentTab}
         onNavigate={handleNavigate}
@@ -195,12 +202,15 @@ const MainApp: React.FC = () => {
       {/* Main Content Area */}
       <main className="flex-1">
         
-        {/* Protected Route Enforcement: If unauthenticated, always render Login Page */}
-        {(!isAuthenticated || !user || currentTab === 'login') ? (
-          <LoginPage onLoginSuccess={() => handleNavigate('home')} />
+        {/* LOGIN PAGE: Rendered only when visiting /login */}
+        {currentTab === 'login' ? (
+          <LoginPage
+            onLoginSuccess={() => handleNavigate('home')}
+            onReturnHome={() => handleNavigate('home')}
+          />
         ) : (
           <>
-            {/* TAB: HOME */}
+            {/* TAB: HOME (Public to all visitors and students) */}
             {currentTab === 'home' && (
               <>
                 {/* Hero Section */}
@@ -255,7 +265,7 @@ const MainApp: React.FC = () => {
                   </div>
                 </section>
 
-                {/* Digital Library Embedded Section */}
+                {/* Digital Library Embedded Section (Public browsing & simulation launch) */}
                 <section className="py-12 bg-white border-t border-slate-200/80">
                   <DigitalLibrary
                     onOpenDetails={openResource}
@@ -268,7 +278,7 @@ const MainApp: React.FC = () => {
               </>
             )}
 
-            {/* TAB: CURRICULUM EXPLORER */}
+            {/* TAB: CURRICULUM EXPLORER (Public) */}
             {currentTab === 'curriculum' && (
               <CurriculumExplorer
                 onOpenLibraryWithFilter={(gradeId, subjectId, unit, topic) => {
@@ -286,7 +296,7 @@ const MainApp: React.FC = () => {
               />
             )}
 
-            {/* TAB: DIGITAL LIBRARY (MAIN LIBRARY DASHBOARD) */}
+            {/* TAB: DIGITAL LIBRARY (MAIN LIBRARY DASHBOARD - Public to all visitors) */}
             {currentTab === 'library' && (
               <DigitalLibrary
                 onOpenDetails={openResource}
@@ -296,43 +306,43 @@ const MainApp: React.FC = () => {
               />
             )}
 
-            {/* TAB: GRADES ONLY */}
+            {/* TAB: GRADES ONLY (Public) */}
             {currentTab === 'grades' && (
               <div className="py-6">
                 <GradeSection onSelectGrade={handleSelectGrade} />
               </div>
             )}
 
-            {/* TAB: SUBJECTS ONLY */}
+            {/* TAB: SUBJECTS ONLY (Public) */}
             {currentTab === 'subjects' && (
               <div className="py-6">
                 <SubjectSection onSelectSubject={handleSelectSubject} />
               </div>
             )}
 
-            {/* TAB: USER'S DASHBOARD */}
+            {/* TAB: USER'S DASHBOARD (Protected) */}
             {currentTab === 'my-resources' && (
               <UserDashboard
                 onOpenDetails={openResource}
                 onLaunch={launchResource}
                 onOpenInsertModal={handleOpenInsert}
                 onEditResource={handleEditResource}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                onOpenAuthModal={() => handleNavigate('login')}
               />
             )}
 
-            {/* TAB: FAVORITES */}
+            {/* TAB: FAVORITES (Protected) */}
             {currentTab === 'favorites' && (
               <UserDashboard
                 onOpenDetails={openResource}
                 onLaunch={launchResource}
                 onOpenInsertModal={handleOpenInsert}
                 onEditResource={handleEditResource}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                onOpenAuthModal={() => handleNavigate('login')}
               />
             )}
 
-            {/* TAB: REVIEW WORKFLOW (Reviewer & Admin) */}
+            {/* TAB: REVIEW WORKFLOW (Protected - Reviewer & Admin) */}
             {currentTab === 'review' && (role === 'reviewer' || isAdminRole(role)) && (
               <ReviewWorkflowPage
                 onOpenDetails={openResource}
@@ -340,7 +350,7 @@ const MainApp: React.FC = () => {
               />
             )}
 
-            {/* TAB: ADMIN DASHBOARD (Administrator) */}
+            {/* TAB: ADMIN DASHBOARD (Protected - Administrator Only) */}
             {currentTab === 'admin' && isAdminRole(role) && (
               <AdminDashboard
                 onNavigateToReview={() => handleNavigate('review')}
@@ -352,7 +362,7 @@ const MainApp: React.FC = () => {
               />
             )}
 
-            {/* TAB: ADMIN SETTINGS (Administrator) */}
+            {/* TAB: ADMIN SETTINGS (Protected - Administrator Only) */}
             {currentTab === 'settings' && isAdminRole(role) && (
               <AdminDashboard
                 initialTab="system"
@@ -368,7 +378,7 @@ const MainApp: React.FC = () => {
         )}
       </main>
 
-      {/* Resource Details Modal */}
+      {/* Resource Details Modal (Public - can view details & download without login) */}
       <ResourceDetailsModal
         resource={activeResource}
         isOpen={!!activeResource}
@@ -377,14 +387,14 @@ const MainApp: React.FC = () => {
         onEditResource={handleEditResource}
       />
 
-      {/* Secure Sandboxed Simulation Runner Modal */}
+      {/* Secure Sandboxed Simulation Runner Modal (Public - any student can play simulations) */}
       <ResourceSandboxModal
         resource={sandboxResource}
         isOpen={isSandboxOpen}
         onClose={closeSandbox}
       />
 
-      {/* Insert / Edit Resource Modal */}
+      {/* Insert / Edit Resource Modal (Protected) */}
       <InsertResourceModal
         isOpen={isInsertModalOpen}
         onClose={() => {
@@ -400,13 +410,13 @@ const MainApp: React.FC = () => {
         onClose={() => setIsAuthModalOpen(false)}
       />
 
-      {/* About School & Library Modal */}
+      {/* About School & Library Modal (Public) */}
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
       />
 
-      {/* Footer */}
+      {/* Footer (Public) */}
       <Footer
         onNavigate={handleNavigate}
         onOpenAbout={() => setIsAboutModalOpen(true)}
