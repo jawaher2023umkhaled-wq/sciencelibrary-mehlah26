@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { ResourceItem, PreviewType, ResourceStatus } from '../types';
+import { getSimulationContent } from '../data/simulations';
 
 /**
  * Validates whether a string is a standard RFC4122 v4 UUID.
@@ -42,22 +43,33 @@ export function toSupabaseRow(item: ResourceItem): {
 
   // Requirement 3: Ensure that when a resource with an uploaded .html file is saved to Supabase,
   // its HTML content or its Supabase Storage public file URL is properly saved to the database record.
-  let url = item.fileUrl || '';
-  if (item.htmlContent && item.htmlContent.trim().length > 0) {
-    if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image')) {
-      url = 'data:text/html;charset=utf-8,' + encodeURIComponent(item.htmlContent);
+  const rawHtml = item.htmlContent || item.html_content;
+  let url = item.fileUrl || item.file_url || '';
+
+  if (rawHtml && rawHtml.trim().length > 0) {
+    // If HTML code or simulation package is present, always store it encoded into url
+    if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
+      url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
     }
-  } else if (!url) {
-    url = item.thumbnailUrl || '';
+  } else if (!url || url.startsWith('https://images.unsplash.com')) {
+    // Check if there is built-in simulation code for this resource
+    const builtinSim = getSimulationContent(item);
+    if (builtinSim) {
+      url = 'data:text/html;charset=utf-8,' + encodeURIComponent(builtinSim);
+    } else {
+      url = item.thumbnailUrl || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+    }
   }
 
-  const downloadUrl = (item.fileUrl && !item.fileUrl.startsWith('https://images.unsplash.com')) ? item.fileUrl : undefined;
+  const downloadUrl = (item.fileUrl && !item.fileUrl.startsWith('https://images.unsplash.com'))
+    ? item.fileUrl
+    : (url.startsWith('http') ? url : undefined);
 
   return {
     id,
     title: item.title || 'مورد تعليمي بدون عنوان',
     description: item.description || '',
-    type: item.resourceType || 'محاكاة',
+    type: item.resourceType || item.type || 'محاكاة',
     subject: item.subjectName || 'العلوم',
     grade: item.gradeName || 'الصف الخامس',
     url,
@@ -76,13 +88,19 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   const type = String(row.type || 'محاكاة');
   const subject = String(row.subject || 'العلوم');
   const grade = String(row.grade || 'الصف الخامس');
-  const rawUrl = row.url ? String(row.url) : '';
+  
+  // Inspect all potential columns and aliases (url, file_url, file_path, html_content, download_url)
+  const rawUrl = String(row.url || row.file_url || row.file_path || '');
   const downloadUrl = row.download_url ? String(row.download_url) : '';
+  const rawHtmlField = row.html_content ? String(row.html_content) : '';
   const createdAt = String(row.created_at || new Date().toISOString());
 
   // Detect and decode HTML content from database record
   let extractedHtml: string | undefined = undefined;
-  if (rawUrl.startsWith('data:text/html;charset=utf-8,')) {
+
+  if (rawHtmlField && rawHtmlField.trim().length > 0) {
+    extractedHtml = rawHtmlField;
+  } else if (rawUrl.startsWith('data:text/html;charset=utf-8,')) {
     try {
       extractedHtml = decodeURIComponent(rawUrl.replace('data:text/html;charset=utf-8,', ''));
     } catch {
@@ -92,36 +110,68 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     try {
       extractedHtml = decodeURIComponent(escape(atob(rawUrl.replace('data:text/html;base64,', ''))));
     } catch {
-      extractedHtml = atob(rawUrl.replace('data:text/html;base64,', ''));
+      try {
+        extractedHtml = atob(rawUrl.replace('data:text/html;base64,', ''));
+      } catch {
+        extractedHtml = undefined;
+      }
     }
   } else if (rawUrl.trim().startsWith('<!DOCTYPE html') || rawUrl.trim().startsWith('<html') || (rawUrl.includes('</') && rawUrl.includes('<script'))) {
     extractedHtml = rawUrl;
   }
 
-  const isInteractiveType = 
-    type.includes('محاكاة') || 
-    type.includes('تفاعلي') || 
-    type.toLowerCase().includes('simulation') || 
-    type.toLowerCase().includes('interactive') ||
-    !!extractedHtml ||
-    rawUrl.endsWith('.html') ||
-    rawUrl.endsWith('.htm') ||
-    downloadUrl.endsWith('.html');
+  // If HTML is still not extracted, check built-in simulation repository
+  if (!extractedHtml) {
+    const builtinSim = getSimulationContent({ title, description, topic: title, resourceType: type, type });
+    if (builtinSim) {
+      extractedHtml = builtinSim;
+    }
+  }
 
-  const fileUrl = rawUrl || downloadUrl || undefined;
-  const thumbnailUrl = (!rawUrl.startsWith('data:text/html') && !rawUrl.startsWith('<!DOCTYPE') && !rawUrl.startsWith('<html')) 
-    ? rawUrl 
+  const isRawUrlImage = rawUrl.startsWith('https://images.unsplash.com') ||
+                        /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(rawUrl);
+
+  const isRawUrlHtmlOrStorage = rawUrl.toLowerCase().includes('.html') ||
+                                rawUrl.toLowerCase().includes('.htm') ||
+                                rawUrl.includes('/storage/') ||
+                                rawUrl.startsWith('data:text/html');
+
+  let fileUrl: string | undefined = undefined;
+  if (isRawUrlHtmlOrStorage || (!isRawUrlImage && rawUrl.startsWith('http'))) {
+    fileUrl = rawUrl;
+  } else if (downloadUrl && downloadUrl.startsWith('http')) {
+    fileUrl = downloadUrl;
+  } else if (extractedHtml) {
+    fileUrl = `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}`;
+  }
+
+  const thumbnailUrl = isRawUrlImage
+    ? rawUrl
     : 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+
+  const typeLower = type.toLowerCase();
+  const isInteractiveType =
+    typeLower === 'simulation' ||
+    typeLower.includes('simulation') ||
+    typeLower.includes('محاكاة') ||
+    typeLower.includes('تفاعلي') ||
+    typeLower.includes('interactive') ||
+    !!extractedHtml ||
+    (fileUrl && (fileUrl.includes('.html') || fileUrl.includes('/storage/')));
 
   return {
     id,
     title,
     description,
     thumbnailUrl,
-    fileUrl,
+    fileUrl: fileUrl || (extractedHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}` : undefined),
+    file_url: fileUrl,
+    htmlContent: extractedHtml,
+    html_content: extractedHtml,
     fileName: `${title}.html`,
     fileType: isInteractiveType ? '.html' : undefined,
     resourceType: type,
+    type,
     subjectName: subject,
     gradeName: grade,
     gradeId: 'grade-' + grade,
@@ -139,7 +189,6 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     usageCount: 0,
     downloadCount: 0,
     previewType: isInteractiveType ? 'html' : 'document',
-    htmlContent: extractedHtml,
     allowDownload: true,
     allowPreview: true,
     createdAt,

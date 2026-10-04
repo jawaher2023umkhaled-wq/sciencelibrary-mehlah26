@@ -478,11 +478,13 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
           text = text.replace('<html', '<html dir="rtl" lang="ar"');
         }
         setHtmlContent(text);
-        setResourceType('درس تفاعلي');
+        setFileName(file.name);
+        setFileType('.html');
+        setResourceType('محاكاة تفاعلية');
         setIsZipValidated(true);
         setUploadProgress(100);
         setIsUploading(false);
-        showToast('تم تحميل صفحة HTML بنجاح وجاهزة للمعاينة', 'success');
+        showToast('تم تحميل صفحة المحاكاة HTML بنجاح وجاهزة للعرض التفاعلي', 'success');
 
       } else {
         // Other files like PDF, PPTX, DOCX, MP4, etc.
@@ -707,6 +709,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     const authorName = author.trim() || resourceToEdit?.authorName || user?.displayName || 'عضو هيئة التدريس';
     const authorId = resourceToEdit?.authorId || user?.id || 'guest-author';
 
+    const finalHtml = htmlContent || undefined;
+    const finalFileUrl = finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined);
+
     const resourceDataRecord = {
       title: title.trim(),
       authorName,
@@ -723,6 +728,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       topic: topic.trim() || title.trim(),
       topicId: matchedTopic?.id || resourceToEdit?.topicId,
       resourceType,
+      type: resourceType,
       resourceTypeId: matchedType?.id || resourceToEdit?.resourceTypeId,
       category,
       pedagogicalCategory: category,
@@ -732,9 +738,11 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       thumbnailUrl: thumbnailUrl || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80',
       fileName: fileName || `${title}.html`,
       fileSize: fileSize || '1.0 MB',
-      fileType: fileType || '.html',
-      fileUrl: htmlContent ? `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}` : (resourceToEdit?.fileUrl || undefined),
-      htmlContent: htmlContent || undefined,
+      fileType: fileType || (finalHtml ? '.html' : undefined),
+      fileUrl: finalFileUrl,
+      file_url: finalFileUrl,
+      htmlContent: finalHtml,
+      html_content: finalHtml,
       supportingFiles,
       version,
       usageRights,
@@ -742,7 +750,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       allowPreview,
       usageContext,
       executionTime,
-      previewType: ((htmlContent || resourceType.includes('محاكاة') || fileType === '.html') ? 'html' : 'document') as PreviewType
+      previewType: ((finalHtml || resourceType.includes('محاكاة') || fileType === '.html' || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation')) ? 'html' : 'document') as PreviewType
     };
 
     if (resourceToEdit) {

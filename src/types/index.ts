@@ -14,24 +14,92 @@ export const getRoleArabicLabel = (role?: UserRole | null): string => {
  * Universal helper to determine if a resource is an interactive HTML simulation,
  * experiment, or web package requiring sandbox iframe execution.
  */
-export const isResourceInteractive = (resource?: ResourceItem | null): boolean => {
+export const isResourceInteractive = (
+  resource?: (ResourceItem & {
+    type?: string;
+    file_url?: string;
+    file_path?: string;
+    html_content?: string;
+    url?: string;
+    download_url?: string;
+  }) | null
+): boolean => {
   if (!resource) return false;
-  if (resource.htmlContent && resource.htmlContent.trim().length > 0) return true;
-  if (resource.previewType === 'html') return true;
-  if (resource.fileType === '.html' || resource.fileType === 'html') return true;
-  if (resource.fileName?.toLowerCase().endsWith('.html') || resource.fileName?.toLowerCase().endsWith('.htm')) return true;
-  
-  const fileUrl = (resource.fileUrl || '').toLowerCase();
-  if (fileUrl.startsWith('data:text/html') || fileUrl.endsWith('.html') || fileUrl.endsWith('.htm') || fileUrl.includes('.html')) return true;
-  
-  const resType = (resource.resourceType || '').toLowerCase();
-  if (resType.includes('محاكاة') || resType.includes('تفاعلي') || resType.includes('simulation') || resType.includes('interactive')) return true;
-  
-  const cat = (resource.category || '').toLowerCase();
-  if (cat.includes('محاكاة') || cat.includes('تفاعلي') || cat.includes('simulation')) return true;
 
-  const pedCat = (resource.pedagogicalCategory || '').toLowerCase();
-  if (pedCat.includes('محاكاة') || pedCat.includes('تفاعلي') || pedCat.includes('simulation')) return true;
+  // 1. Direct HTML content presence (camelCase or snake_case)
+  const directHtml = resource.htmlContent || resource.html_content;
+  if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) {
+    return true;
+  }
+
+  // 2. Explicit previewType === 'html'
+  if (resource.previewType === 'html') return true;
+
+  // 3. File extension or mime type check
+  const fType = (resource.fileType || '').toLowerCase();
+  if (fType === '.html' || fType === 'html' || fType === '.htm' || fType === 'text/html' || fType === '.zip') {
+    return true;
+  }
+
+  const fName = (resource.fileName || '').toLowerCase();
+  if (fName.endsWith('.html') || fName.endsWith('.htm') || fName.endsWith('.zip')) {
+    return true;
+  }
+
+  // 4. File URLs or Supabase storage paths presence
+  const fileUrl = (resource.fileUrl || resource.file_url || resource.file_path || resource.url || resource.download_url || '').toLowerCase();
+  if (
+    fileUrl.startsWith('data:text/html') ||
+    fileUrl.endsWith('.html') ||
+    fileUrl.endsWith('.htm') ||
+    fileUrl.includes('.html?') ||
+    fileUrl.includes('.htm?') ||
+    fileUrl.includes('/storage/') ||
+    fileUrl.endsWith('.zip')
+  ) {
+    return true;
+  }
+
+  // 5. type === 'simulation' or resourceType check
+  const anyType = (
+    (resource.type || '') + ' ' +
+    (resource.resourceType || '') + ' ' +
+    (resource.resourceTypeId || '')
+  ).toLowerCase();
+
+  if (
+    anyType === 'simulation' ||
+    anyType.includes('simulation') ||
+    anyType.includes('محاكاة') ||
+    anyType.includes('تفاعلي') ||
+    anyType.includes('interactive') ||
+    anyType.includes('تجربة') ||
+    anyType.includes('مختبر')
+  ) {
+    return true;
+  }
+
+  // 6. Category or pedagogical category
+  const cat = ((resource.category || '') + ' ' + (resource.pedagogicalCategory || '')).toLowerCase();
+  if (
+    cat.includes('simulation') ||
+    cat.includes('محاكاة') ||
+    cat.includes('تفاعلي') ||
+    cat.includes('interactive')
+  ) {
+    return true;
+  }
+
+  // 7. Title or Topic mentions simulation or interactive
+  const titleAndTopic = ((resource.title || '') + ' ' + (resource.topic || '')).toLowerCase();
+  if (
+    titleAndTopic.includes('محاكاة') ||
+    titleAndTopic.includes('simulation') ||
+    titleAndTopic.includes('تفاعلي') ||
+    titleAndTopic.includes('interactive')
+  ) {
+    return true;
+  }
 
   return false;
 };
@@ -151,6 +219,12 @@ export interface ResourceItem {
   downloadCount: number;
   previewType: PreviewType;
   htmlContent?: string; // Sandboxed HTML code or simulator
+  type?: string; // Alias for Supabase type column
+  file_url?: string; // Alias for Supabase file_url column
+  file_path?: string; // Alias for Supabase file_path column
+  html_content?: string; // Alias for Supabase html_content column
+  url?: string; // Direct database url column
+  download_url?: string; // Direct database download_url column
   educationalObjectives?: string[]; // الأهداف التعليمية
   scientificConcepts?: string[]; // المفاهيم العلمية
   executionTime?: string; // زمن التنفيذ (مثل: 45 دقيقة)

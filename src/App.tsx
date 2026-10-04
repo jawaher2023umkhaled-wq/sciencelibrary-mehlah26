@@ -12,7 +12,7 @@ import { ReviewWorkflowPage } from './components/ReviewWorkflowPage';
 import { AdminDashboard } from './components/AdminDashboard';
 import { UserDashboard } from './components/UserDashboard';
 import { ResourceDetailsModal } from './components/ResourceDetailsModal';
-import { ResourceSandboxModal } from './components/ResourceSandboxModal';
+import { ResourceViewer } from './components/ResourceViewer';
 import { InsertResourceModal } from './components/InsertResourceModal';
 import { AuthModal } from './components/AuthModal';
 import { AboutModal } from './components/AboutModal';
@@ -388,7 +388,7 @@ const MainApp: React.FC = () => {
       />
 
       {/* Secure Sandboxed Simulation Runner Modal (Public - any student can play simulations) */}
-      <ResourceSandboxModal
+      <ResourceViewer
         resource={sandboxResource}
         isOpen={isSandboxOpen}
         onClose={closeSandbox}

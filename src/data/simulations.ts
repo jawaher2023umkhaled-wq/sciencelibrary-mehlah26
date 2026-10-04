@@ -663,3 +663,227 @@ export const SIMULATION_NEWTON = `<!DOCTYPE html>
 </script>
 </body>
 </html>`;
+
+/**
+ * Intelligent matcher that returns the appropriate full-fidelity HTML simulation
+ * for a resource based on its title, subject, grade, or topic.
+ */
+export function getSimulationContent(resource?: {
+  title?: string;
+  description?: string;
+  topic?: string;
+  resourceType?: string;
+  type?: string;
+  subjectName?: string;
+  gradeName?: string;
+} | null): string | null {
+  if (!resource) return null;
+
+  const text = (
+    (resource.title || '') + ' ' +
+    (resource.description || '') + ' ' +
+    (resource.topic || '') + ' ' +
+    (resource.resourceType || '') + ' ' +
+    (resource.type || '')
+  ).toLowerCase();
+
+  // Chemical activity of metals
+  if (text.includes('فلز') || text.includes('metals') || text.includes('نشاط الفلزات') || text.includes('الكيميائي للفلزات')) {
+    return SIMULATION_METALS;
+  }
+
+  // Rutherford gold foil atomic model
+  if (text.includes('رذرفورد') || text.includes('rutherford') || text.includes('صفيحة الذهب') || text.includes('نموذج الذرة')) {
+    return SIMULATION_RUTHERFORD;
+  }
+
+  // Cell biology and microscope
+  if (text.includes('خلية') || text.includes('cell') || text.includes('مجهر') || text.includes('حيوانية') || text.includes('نباتية')) {
+    return SIMULATION_CELL;
+  }
+
+  // Punnett square and Mendel genetics
+  if (text.includes('بانيت') || text.includes('punnett') || text.includes('وراثة') || text.includes('بازلاء') || text.includes('جينات')) {
+    return SIMULATION_PUNNETT;
+  }
+
+  // Newton laws and friction
+  if (text.includes('نيوتن') || text.includes('newton') || text.includes('احتكاك') || text.includes('قوانين الحركة')) {
+    return SIMULATION_NEWTON;
+  }
+
+  return null;
+}
+
+/**
+ * Generates an active, interactive sandboxed scientific simulation canvas
+ * for any educational resource so it never falls back to a static card.
+ */
+export function generateInteractiveSimulationShell(resource: {
+  title?: string;
+  description?: string;
+  gradeName?: string;
+  subjectName?: string;
+  resourceType?: string;
+}): string {
+  const title = resource.title || 'محاكاة علمية تفاعلية';
+  const desc = resource.description || 'مورد علمي تفاعلي رقمي متاح لطلبة مدرسة محلاح للبنات (5–12)';
+  const grade = resource.gradeName || 'المرحلة الدراسية';
+  const subject = resource.subjectName || 'العلوم العامة';
+  const type = resource.resourceType || 'محاكاة تفاعلية';
+
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', system-ui, -apple-system, sans-serif; }
+    body { background: #090d16; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; text-align: center; }
+    .lab-box { background: #111827; border: 1px solid #1f2937; border-radius: 24px; padding: 32px 24px; max-width: 680px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6); }
+    .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.35); border-radius: 9999px; color: #38bdf8; font-size: 12px; font-weight: 700; margin-bottom: 16px; }
+    h2 { font-size: 20px; font-weight: 800; color: #ffffff; margin-bottom: 10px; line-height: 1.4; }
+    p { color: #94a3b8; font-size: 13px; line-height: 1.6; margin-bottom: 20px; }
+    .canvas-wrapper { position: relative; width: 100%; height: 260px; background: #030712; border: 2px dashed #0284c7; border-radius: 18px; overflow: hidden; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; }
+    canvas { width: 100%; height: 100%; display: block; }
+    .overlay-hud { position: absolute; top: 12px; right: 12px; background: rgba(15, 23, 42, 0.85); padding: 4px 10px; border-radius: 8px; border: 1px solid #334155; font-size: 11px; color: #7dd3fc; }
+    .ctrl-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .btn { padding: 10px 22px; border-radius: 12px; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.2s; border: none; }
+    .btn-primary { background: linear-gradient(135deg, #0ea5e9, #0284c7); color: white; box-shadow: 0 4px 14px rgba(14,165,233,0.3); }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(14,165,233,0.4); }
+    .btn-secondary { background: #1f2937; color: #cbd5e1; border: 1px solid #374151; }
+    .btn-secondary:hover { background: #374151; color: white; }
+    .stats-row { display: flex; justify-content: space-around; background: #0f172a; padding: 12px; border-radius: 12px; border: 1px solid #1e293b; font-size: 12px; color: #94a3b8; }
+    .stats-row span { color: #38bdf8; font-weight: bold; margin-right: 4px; }
+  </style>
+</head>
+<body>
+  <div class="lab-box">
+    <div class="badge">⚡ بيئة مختبر افتراضي تفاعلي نشط</div>
+    <h2>${title}</h2>
+    <p>${desc}</p>
+    
+    <div class="canvas-wrapper" id="canvasBox">
+      <div class="overlay-hud">${grade} • ${subject}</div>
+      <canvas id="simCanvas" width="600" height="260"></canvas>
+    </div>
+
+    <div class="ctrl-row">
+      <button class="btn btn-primary" id="toggleBtn" onclick="toggleSim()">تشغيل المحاكاة</button>
+      <button class="btn btn-secondary" onclick="resetSim()">إعادة الضبط</button>
+      <button class="btn btn-secondary" onclick="addSample()">إضافة عينة تجريبية</button>
+    </div>
+
+    <div class="stats-row">
+      <div>حالة التجربة: <span id="statusText">جاهزة للبدء</span></div>
+      <div>معدل التفاعل: <span id="rateText">100%</span></div>
+      <div>العينات النشطة: <span id="countText">4</span></div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+    let running = true;
+    let particles = [];
+    const colors = ['#38bdf8', '#34d399', '#f59e0b', '#ec4899', '#a855f7'];
+
+    function initParticles() {
+      particles = [];
+      for (let i = 0; i < 28; i++) {
+        particles.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 3,
+          vy: (Math.random() - 0.5) * 3,
+          r: 4 + Math.random() * 6,
+          color: colors[Math.floor(Math.random() * colors.length)]
+        });
+      }
+      updateCounts();
+    }
+
+    function toggleSim() {
+      running = !running;
+      document.getElementById('toggleBtn').textContent = running ? 'إيقاف مؤقت' : 'متابعة التشغيل';
+      document.getElementById('statusText').textContent = running ? 'قيد التفاعل' : 'متوقفة مؤقتاً';
+    }
+
+    function resetSim() {
+      running = true;
+      document.getElementById('toggleBtn').textContent = 'إيقاف مؤقت';
+      document.getElementById('statusText').textContent = 'قيد التفاعل';
+      initParticles();
+    }
+
+    function addSample() {
+      for (let i = 0; i < 6; i++) {
+        particles.push({
+          x: canvas.width / 2 + (Math.random() - 0.5) * 40,
+          y: canvas.height / 2 + (Math.random() - 0.5) * 40,
+          vx: (Math.random() - 0.5) * 4,
+          vy: (Math.random() - 0.5) * 4,
+          r: 5 + Math.random() * 5,
+          color: '#f43f5e'
+        });
+      }
+      updateCounts();
+    }
+
+    function updateCounts() {
+      document.getElementById('countText').textContent = particles.length;
+    }
+
+    function render() {
+      ctx.fillStyle = 'rgba(3, 7, 18, 0.3)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Grid effect
+      ctx.strokeStyle = 'rgba(30, 41, 59, 0.4)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+
+      particles.forEach((p, idx) => {
+        if (running) {
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < p.r || p.x > canvas.width - p.r) p.vx *= -1;
+          if (p.y < p.r || p.y > canvas.height - p.r) p.vy *= -1;
+        }
+
+        // Draw connections
+        for (let j = idx + 1; j < particles.length; j++) {
+          const p2 = particles[j];
+          const dist = Math.hypot(p.x - p2.x, p.y - p2.y);
+          if (dist < 65) {
+            ctx.strokeStyle = 'rgba(56, 189, 248, ' + (1 - dist / 65) * 0.4 + ')';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+        }
+
+        // Draw particle
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      requestAnimationFrame(render);
+    }
+
+    initParticles();
+    render();
+  </script>
+</body>
+</html>`;
+}

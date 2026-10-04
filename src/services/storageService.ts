@@ -52,42 +52,50 @@ export const storageService = {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_RESOURCES);
       if (!stored) {
-        this.saveResources(INITIAL_RESOURCES);
-        return INITIAL_RESOURCES;
+        return [];
       }
       let parsed: ResourceItem[] = JSON.parse(stored);
 
-      // Purge res-chem-acid-base-10 completely from local state
-      let needsResave = false;
-      const originalCount = parsed.length;
-      parsed = parsed.filter(r => r.id !== 'res-chem-acid-base-10' && !r.title?.includes('معايرة الأحماض والقواعد ومقياس الرقم الهيدروجيني pH'));
-      if (parsed.length !== originalCount) {
-        needsResave = true;
+      // Cleanse any legacy mock resources
+      const legacyMockTitles = [
+        'محاكاة النشاط الكيميائي للفلزات',
+        'تجربة رذرفورد على صفيحة الذهب',
+        'خلية الحيوان',
+        'مربع بانيت والوراثة المندلية في نبات البازلاء',
+        'قوانين نيوتن للحركة وتطبيقات الاحتكاك',
+        'دورة الماء في الطبيعة والتوازن البيئي',
+        'أجزاء المجهر الضوئي المركب وقواعد السلامة المخبرية',
+        'انكسار الضوء والعدسات المحدبة والمقعرة',
+        'ورقة عمل استقصائية تجريبية (تحتاج تصنيف)',
+        'المعايرة الحجمية وتحديد تركيز حمض مجهول',
+        'فيديو ثلاثي الأبعاد: آلية تضاعف DNA وبناء البروتين',
+        'معايرة الأحماض والقواعد ومقياس الرقم الهيدروجيني pH'
+      ];
+      const legacyMockIds = [
+        'res-chem-acid-base-10',
+        'ac015ece-0b9a-4221-8f85-615c47c1a9ec',
+        '35153de9-30cf-4eb5-837a-07d81c3be351',
+        '4779ff12-6087-4f6c-a968-451ee93db061',
+        'eae5d3e2-37d5-4f05-9791-d5ae8e57dfd8',
+        '224c2002-a9f3-4382-a52f-1dabc182a666',
+        'aa5b169d-da85-40a0-b170-c93bf5e59714',
+        '95569e0c-e69b-4c05-82d5-f4d740b023c6',
+        'f5a88df2-751f-4ac6-8c87-c36630e1d198',
+        '59f58afc-1214-47b6-bde2-833f74fb3ee8',
+        'b0d566a5-8109-435e-bde4-61edf57bf937',
+        '788a3116-660b-468f-bb18-c2e5c2f4f1b7'
+      ];
+
+      const cleaned = parsed.filter(r => !legacyMockIds.includes(r.id) && !legacyMockTitles.includes(r.title));
+      if (cleaned.length !== parsed.length) {
+        this.saveResources(cleaned);
+        return cleaned;
       }
 
-      // Convert any legacy non-UUID items in local storage to standard v4 UUIDs
-      parsed = parsed.map(r => {
-        if (!isValidUuid(r.id)) {
-          needsResave = true;
-          return { ...r, id: generateUuid() };
-        }
-        return r;
-      });
-
-      let hasNew = false;
-      for (const initial of INITIAL_RESOURCES) {
-        if (!parsed.some(r => r.id === initial.id)) {
-          parsed.push(initial);
-          hasNew = true;
-        }
-      }
-      if (hasNew || needsResave) {
-        this.saveResources(parsed);
-      }
       return parsed;
     } catch (e) {
       console.error('Failed to load resources from storage:', e);
-      return INITIAL_RESOURCES;
+      return [];
     }
   },
 
