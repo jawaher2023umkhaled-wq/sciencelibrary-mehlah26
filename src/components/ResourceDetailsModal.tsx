@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ResourceItem, isAdminRole } from '../types';
+import { ResourceItem, isAdminRole, isResourceInteractive } from '../types';
 import { useResources } from '../context/ResourceContext';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -66,7 +66,7 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
   const isFavorite = favorites.includes(resource.id);
   const recommended = getRecommendedResources(resource);
   const similar = getSimilarResources(resource);
-  const isInteractive = !!resource.htmlContent || resource.previewType === 'html';
+  const isInteractive = isResourceInteractive(resource);
   const isAuthor = user?.id === resource.authorId || user?.displayName === resource.authorName || isAdminRole(user?.role);
   const canEdit = isAuthor && (resource.status === 'draft' || resource.status === 'needs_revision' || isAdminRole(user?.role));
 

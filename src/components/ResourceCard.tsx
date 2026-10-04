@@ -1,5 +1,5 @@
 import React from 'react';
-import { ResourceItem } from '../types';
+import { ResourceItem, isResourceInteractive } from '../types';
 import { useResources } from '../context/ResourceContext';
 import {
   Star,
@@ -61,7 +61,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
     }
   };
 
-  const isInteractive = resource.htmlContent || resource.previewType === 'html';
+  const isInteractive = isResourceInteractive(resource);
 
   return (
     <div className="group bg-white rounded-3xl overflow-hidden border border-slate-200/80 hover:border-sky-300 shadow-xs hover:shadow-xl hover:shadow-sky-900/10 transition-all duration-300 flex flex-col justify-between transform hover:-translate-y-1">

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useResources } from '../context/ResourceContext';
 import { GRADES as DEFAULT_GRADES, SUBJECTS as DEFAULT_SUBJECTS } from '../data/initialData';
-import { ResourceItem, LibraryFilterState } from '../types';
+import { ResourceItem, LibraryFilterState, isResourceInteractive } from '../types';
 import { ResourceCard } from './ResourceCard';
 import {
   Search,
@@ -685,7 +685,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {paginatedResources.map(resource => {
-                  const isInteractive = resource.htmlContent || resource.previewType === 'html';
+                  const isInteractive = isResourceInteractive(resource);
                   return (
                     <tr key={resource.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-3 px-4">
@@ -779,7 +779,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({
         /* COMPACT GRID VIEW */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {paginatedResources.map(resource => {
-            const isInteractive = resource.htmlContent || resource.previewType === 'html';
+            const isInteractive = isResourceInteractive(resource);
             return (
               <div
                 key={resource.id}

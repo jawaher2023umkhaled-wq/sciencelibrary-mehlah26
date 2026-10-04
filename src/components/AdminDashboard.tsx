@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useResources } from '../context/ResourceContext';
 import { useAuth } from '../context/AuthContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
-import { UserRole, isAdminRole, getRoleArabicLabel, GradeItem, SubjectItem, UnitItem, TopicItem, CurriculumItem, ResourceItem } from '../types';
+import { UserRole, isAdminRole, getRoleArabicLabel, GradeItem, SubjectItem, UnitItem, TopicItem, CurriculumItem, ResourceItem, isResourceInteractive } from '../types';
 import {
   ShieldCheck,
   FileText,
@@ -875,7 +875,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {adminFilteredResources.map((res) => {
-                      const isInteractive = !!res.htmlContent || res.previewType === 'html';
+                      const isInteractive = isResourceInteractive(res);
                       return (
                         <tr key={res.id} className="hover:bg-slate-50/70 transition-colors">
                           <td className="p-4">

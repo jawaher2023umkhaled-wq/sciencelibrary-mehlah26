@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import { useAuth } from '../context/AuthContext';
 import { useResources } from '../context/ResourceContext';
 import { GRADES, SUBJECTS } from '../data/initialData';
-import { ResourceItem, SupportingFile } from '../types';
+import { ResourceItem, SupportingFile, PreviewType } from '../types';
 import {
   X,
   UploadCloud,
@@ -733,6 +733,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       fileName: fileName || `${title}.html`,
       fileSize: fileSize || '1.0 MB',
       fileType: fileType || '.html',
+      fileUrl: htmlContent ? `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}` : (resourceToEdit?.fileUrl || undefined),
       htmlContent: htmlContent || undefined,
       supportingFiles,
       version,
@@ -741,7 +742,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       allowPreview,
       usageContext,
       executionTime,
-      previewType: (htmlContent ? 'html' : 'document') as 'html' | 'document'
+      previewType: ((htmlContent || resourceType.includes('محاكاة') || fileType === '.html') ? 'html' : 'document') as PreviewType
     };
 
     if (resourceToEdit) {

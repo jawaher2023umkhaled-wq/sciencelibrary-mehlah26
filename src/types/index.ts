@@ -10,6 +10,32 @@ export const getRoleArabicLabel = (role?: UserRole | null): string => {
   return 'المستخدم';
 };
 
+/**
+ * Universal helper to determine if a resource is an interactive HTML simulation,
+ * experiment, or web package requiring sandbox iframe execution.
+ */
+export const isResourceInteractive = (resource?: ResourceItem | null): boolean => {
+  if (!resource) return false;
+  if (resource.htmlContent && resource.htmlContent.trim().length > 0) return true;
+  if (resource.previewType === 'html') return true;
+  if (resource.fileType === '.html' || resource.fileType === 'html') return true;
+  if (resource.fileName?.toLowerCase().endsWith('.html') || resource.fileName?.toLowerCase().endsWith('.htm')) return true;
+  
+  const fileUrl = (resource.fileUrl || '').toLowerCase();
+  if (fileUrl.startsWith('data:text/html') || fileUrl.endsWith('.html') || fileUrl.endsWith('.htm') || fileUrl.includes('.html')) return true;
+  
+  const resType = (resource.resourceType || '').toLowerCase();
+  if (resType.includes('محاكاة') || resType.includes('تفاعلي') || resType.includes('simulation') || resType.includes('interactive')) return true;
+  
+  const cat = (resource.category || '').toLowerCase();
+  if (cat.includes('محاكاة') || cat.includes('تفاعلي') || cat.includes('simulation')) return true;
+
+  const pedCat = (resource.pedagogicalCategory || '').toLowerCase();
+  if (pedCat.includes('محاكاة') || pedCat.includes('تفاعلي') || pedCat.includes('simulation')) return true;
+
+  return false;
+};
+
 export interface UserProfile {
   id: string;
   uid?: string;
