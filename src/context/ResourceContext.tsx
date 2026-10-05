@@ -13,7 +13,8 @@ import {
   AuditLogItem
 } from '../types';
 import { storageService } from '../services/storageService';
-import { supabaseResourceService } from '../services/supabaseResourceService';
+import { supabaseResourceService, generateUuid } from '../services/supabaseResourceService';
+import { supabaseNotificationService } from '../services/supabaseNotificationService';
 import { useAuth } from './AuthContext';
 
 export interface ToastMessage {
@@ -52,7 +53,7 @@ interface ResourceContextType {
   closeSandbox: () => void;
   toggleFavorite: (resourceId: string) => void;
   rateResource: (resourceId: string, score: number) => void;
-  createResource: (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>) => ResourceItem;
+  createResource: (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>) => Promise<ResourceItem | null>;
   updateResource: (id: string, updates: Partial<ResourceItem>) => void;
   startReview: (id: string) => void;
   reviewResource: (id: string, status: ResourceStatus, comment: string) => void;
@@ -147,13 +148,15 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const { data, isLive, error } = await supabaseResourceService.fetchLiveResources();
       if (isLive) {
-        // Real database records directly populate the UI (Requirement #1 & #3)
+        // Real database records directly populate the UI from Supabase public.resources
         setResources(data);
         storageService.saveResources(data);
         setIsSupabaseLive(true);
       } else {
         console.error('Supabase fetch live error:', error);
         setIsSupabaseLive(false);
+        // Do not use mock or unverified local data if Supabase reports error
+        setResources([]);
         if (error) {
           showToast(`تنبيه جلب البيانات من Supabase: ${error}`, 'error');
         }
@@ -161,6 +164,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (e) {
       console.error('Supabase fetch exception:', e);
       setIsSupabaseLive(false);
+      setResources([]);
     } finally {
       setIsSyncingWithSupabase(false);
     }
@@ -184,8 +188,8 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const refreshResources = () => {
-    const list = storageService.getResources();
-    setResources([...list]);
+    // Keep UI strictly connected to authoritative database
+    reloadLiveResources();
   };
 
   const refreshResourceTypes = () => {
@@ -208,8 +212,17 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAuditLogs(storageService.getAuditLogs());
   };
 
-  const refreshNotifications = () => {
+  const refreshNotifications = async () => {
     if (user) {
+      try {
+        const res = await supabaseNotificationService.fetchUserNotifications(user.id, user.email);
+        if (res.isLive) {
+          setNotifications(res.data);
+          return;
+        }
+      } catch (e) {
+        console.warn('Failed to fetch notifications from Supabase:', e);
+      }
       setNotifications(storageService.getUserNotifications(user.id));
     } else {
       setNotifications([]);
@@ -242,16 +255,26 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }, 4000);
   };
 
-  const markNotificationAsRead = (id: string) => {
+  const markNotificationAsRead = async (id: string) => {
     if (!user) return;
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    try {
+      await supabaseNotificationService.markAsRead(id);
+    } catch (e) {
+      console.warn('Supabase markAsRead error:', e);
+    }
     storageService.markNotificationAsRead(user.id, id);
-    refreshNotifications();
   };
 
-  const clearNotifications = () => {
+  const clearNotifications = async () => {
     if (!user) return;
+    setNotifications([]);
+    try {
+      await supabaseNotificationService.markAllAsRead(user.id);
+    } catch (e) {
+      console.warn('Supabase markAllAsRead error:', e);
+    }
     storageService.clearNotifications(user.id);
-    refreshNotifications();
   };
 
   const setFilters = (newFilters: Partial<LibraryFilterState>) => {
@@ -309,25 +332,78 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     showToast('شكراً لك، تم تسجيل تقييمك بنجاح', 'success');
   };
 
-  const createResource = (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>) => {
-    const created = storageService.createResource(resourceData);
-    refreshNotifications();
+  const createResource = async (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>): Promise<ResourceItem | null> => {
+    const newId = generateUuid();
+    const now = new Date().toISOString();
+    const preparedResource: ResourceItem = {
+      ...resourceData,
+      id: newId,
+      ratingAverage: 0,
+      ratingCount: 0,
+      usageCount: 0,
+      downloadCount: 0,
+      createdAt: now,
+      updatedAt: now,
+      publishedAt: resourceData.status === 'published' ? now : undefined,
+      versions: [
+        {
+          versionNumber: resourceData.version || 'الإصدار 1.0',
+          fileUrl: resourceData.fileUrl,
+          changeNotes: 'الإنشاء الأولي للمورد',
+          createdAt: now,
+          createdBy: resourceData.authorName
+        }
+      ]
+    };
 
-    // Direct persistence to Supabase resources table (Requirement #1 & #5)
-    supabaseResourceService.createResource(created).then(({ data: savedRecord, savedToSupabase, error }) => {
-      if (savedToSupabase && savedRecord) {
-        setResources(prev => [savedRecord, ...prev.filter(r => r.id !== savedRecord.id)]);
-        setIsSupabaseLive(true);
-        showToast('تم حفظ المورد بنجاح في قاعدة بيانات Supabase (UUID مسجل)', 'success');
-      } else {
-        console.error('Supabase create persistence failure:', error);
-        // Do not mask database failure
-        setResources(prev => prev.filter(r => r.id !== created.id));
-        showToast(`فشل حفظ المورد في Supabase: ${error || 'يجب تسجيل الدخول كمدير نظام معتمد'}`, 'error');
+    // Direct persistence to Supabase resources table (Authoritative Save)
+    const { data: savedRecord, savedToSupabase, error } = await supabaseResourceService.createResource(preparedResource);
+
+    if (savedToSupabase && savedRecord) {
+      // ONLY update UI React state AFTER confirmed database response
+      setResources(prev => [savedRecord, ...prev.filter(r => r.id !== savedRecord.id)]);
+      setIsSupabaseLive(true);
+
+      // Keep cache in sync only after confirmed database save
+      const currentList = storageService.getResources().filter(r => r.id !== savedRecord.id);
+      storageService.saveResources([savedRecord, ...currentList]);
+
+      // Audit log
+      storageService.addAuditLog({
+        actorId: resourceData.authorId,
+        userId: resourceData.authorId,
+        actorName: resourceData.authorName,
+        action: resourceData.status === 'submitted' ? 'submit' : 'create',
+        resourceId: savedRecord.id,
+        resourceTitle: savedRecord.title,
+        details: resourceData.status === 'submitted' ? 'إنشاء المورد وإرساله للتحكيم' : 'إنشاء مسودة مورد جديد'
+      });
+
+      // Notification
+      if (resourceData.status === 'submitted') {
+        const notifPayload = {
+          userId: resourceData.authorId,
+          title: 'تم إرسال المورد للمراجعة',
+          message: `تم استلام المورد "${savedRecord.title}" بنجاح وإحالته إلى لجنة التحكيم الأكاديمية.`,
+          resourceId: savedRecord.id,
+          type: 'info' as const
+        };
+        supabaseNotificationService.addNotification(notifPayload).catch(console.warn);
+        storageService.addNotification(notifPayload);
+        refreshNotifications();
       }
-    });
 
-    return created;
+      showToast('تم حفظ المورد بنجاح في قاعدة بيانات Supabase (UUID مسجل)', 'success');
+      return savedRecord;
+    } else {
+      console.error('Supabase create persistence failure:', error);
+      // Ensure the resource is NOT in UI state and NOT in cache
+      setResources(prev => prev.filter(r => r.id !== newId));
+      storageService.deleteResource(newId);
+      const actionableError = error || 'تعذر حفظ المورد في Supabase. يرجى التأكد من تسجيل الدخول كمدير نظام معتمد.';
+      showToast(`فشل حفظ المورد في Supabase: ${actionableError}`, 'error');
+      return null;
+    }
   };
 
   const updateResource = (id: string, updates: Partial<ResourceItem>) => {

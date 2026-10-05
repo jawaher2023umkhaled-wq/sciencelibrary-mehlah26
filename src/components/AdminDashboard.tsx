@@ -2707,12 +2707,12 @@ CREATE POLICY "Authenticated users can delete resources" ON public.resources FOR
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     // Execute full automated sequence
                     showToast('بدء تشغيل سيناريو التحقق الشامل E2E...', 'info');
 
                     // Step 1: Create draft test resource
-                    const testRes = createResource({
+                    const testRes = await createResource({
                       title: 'اختبار المكتبة الرقمية',
                       description: 'مورد تجريبي للتحقق من دورة إدراج ومراجعة ونشر الموارد.',
                       gradeId: 'grade-10',
@@ -2732,6 +2732,11 @@ CREATE POLICY "Authenticated users can delete resources" ON public.resources FOR
                       previewType: 'html',
                       htmlContent: `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><style>body{font-family:system-ui;padding:20px;text-align:center;background:#0f172a;color:white;}</style></head><body><h2>مورد اختبار المكتبة الرقمية</h2><p>تم الإنشاء والتحقق بنجاح!</p></body></html>`
                     });
+
+                    if (!testRes) {
+                      showToast('فشل إنشاء المورد التجريبي في Supabase', 'error');
+                      return;
+                    }
 
                     // Step 2: Submit for review
                     setTimeout(() => {

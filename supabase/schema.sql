@@ -69,3 +69,65 @@ CREATE POLICY "Admins can delete resources"
     auth.role() = 'authenticated' 
     AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
   );
+
+-- ==============================================================================
+-- 9. Table Definition: public.notifications
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'info',
+  resource_id TEXT,
+  is_read BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Indexes for Fast User Notification Lookups
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.notifications(created_at DESC);
+
+-- Enable RLS on notifications
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+-- Clean prior notifications policies if re-running
+DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Authenticated users can insert notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
+
+-- Policy 1: Users can view their own notifications or admin can view all
+CREATE POLICY "Users can view own notifications"
+  ON public.notifications
+  FOR SELECT
+  USING (
+    user_id = coalesce(auth.uid()::text, '')
+    OR lower(user_id) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    OR user_id = 'all'
+    OR lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+  );
+
+-- Policy 2: Authenticated users can insert notifications
+CREATE POLICY "Authenticated users can insert notifications"
+  ON public.notifications
+  FOR INSERT
+  WITH CHECK (
+    auth.role() = 'authenticated'
+  );
+
+-- Policy 3: Users can update (mark as read) their own notifications
+CREATE POLICY "Users can update own notifications"
+  ON public.notifications
+  FOR UPDATE
+  USING (
+    user_id = coalesce(auth.uid()::text, '')
+    OR lower(user_id) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    OR user_id = 'all'
+    OR lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+  );
+
+-- 10. Explicit Grants for PostgREST & Reload Cache
+GRANT ALL ON TABLE public.notifications TO anon, authenticated, service_role;
+NOTIFY pgrst, 'reload schema';
+
+

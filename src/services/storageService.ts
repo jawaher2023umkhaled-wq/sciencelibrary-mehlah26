@@ -23,6 +23,7 @@ import {
 } from '../data/initialData';
 
 import { generateUuid, isValidUuid } from './supabaseResourceService';
+import { supabaseNotificationService } from './supabaseNotificationService';
 
 const STORAGE_KEY_RESOURCES = 'maktabat_aloloom_resources_v2';
 const STORAGE_KEY_FAVORITES = 'maktabat_aloloom_favorites_v2';
@@ -497,6 +498,10 @@ export const storageService = {
     } catch (e) {
       console.error('Failed to save notification:', e);
     }
+    // Also dispatch to Supabase public.notifications
+    supabaseNotificationService.addNotification(notification).catch((err) => {
+      console.warn('Supabase notification dispatch notice:', err);
+    });
     return newNotif;
   },
 
@@ -511,6 +516,10 @@ export const storageService = {
         console.error('Failed to update notification:', e);
       }
     }
+    // Also update Supabase public.notifications
+    supabaseNotificationService.markAsRead(notificationId).catch((err) => {
+      console.warn('Supabase mark notification notice:', err);
+    });
   },
 
   clearNotifications(userId: string): void {
@@ -519,6 +528,10 @@ export const storageService = {
     } catch (e) {
       console.error('Failed to clear notifications:', e);
     }
+    // Also mark all as read in Supabase public.notifications
+    supabaseNotificationService.markAllAsRead(userId).catch((err) => {
+      console.warn('Supabase clear notifications notice:', err);
+    });
   },
 
   // Extensible Resource Types (Requirement: Administrator can add new resource types)

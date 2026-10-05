@@ -31,7 +31,8 @@ import {
   Clock,
   BookOpen,
   Award,
-  Maximize2
+  Maximize2,
+  Loader2
 } from 'lucide-react';
 
 interface InsertResourceModalProps {
@@ -121,6 +122,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     hasImages: boolean;
   } | null>(null);
   const [validationError, setValidationError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Live Interactive Preview in modal
   const [showLivePreview, setShowLivePreview] = useState(false);
@@ -676,7 +678,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   /**
    * Final Submission / Save
    */
-  const handleSave = (finalStatus: 'draft' | 'submitted') => {
+  const handleSave = async (finalStatus: 'draft' | 'submitted') => {
     // Validation
     if (!title.trim()) {
       setValidationError('يرجى إدخال عنوان المورد.');
@@ -759,16 +761,28 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         status: finalStatus === 'submitted' ? 'submitted' : (resourceToEdit.status === 'needs_revision' ? 'needs_revision' : finalStatus),
         updatedAt: new Date().toISOString()
       });
+      onClose();
     } else {
-      createResource({
-        ...resourceDataRecord,
-        authorId,
-        authorName,
-        status: finalStatus
-      });
+      setIsSubmitting(true);
+      try {
+        const saved = await createResource({
+          ...resourceDataRecord,
+          authorId,
+          authorName,
+          status: finalStatus
+        });
+        if (saved) {
+          onClose();
+        } else {
+          setValidationError('تعذر حفظ المورد في قاعدة البيانات Supabase. يرجى مراجعة الصلاحيات أو التأكد من تسجيل الدخول كمدير معتمد.');
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setValidationError(`حدث خطأ أثناء الحفظ في Supabase: ${msg}`);
+      } finally {
+        setIsSubmitting(false);
+      }
     }
-
-    onClose();
   };
 
   return (
@@ -1780,20 +1794,22 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
               <>
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => handleSave('draft')}
-                  className="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 disabled:opacity-50 text-slate-800 font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
-                  <span>حفظ كمسودة</span>
+                  <span>{isSubmitting ? 'جارٍ الحفظ في Supabase...' : 'حفظ كمسودة'}</span>
                 </button>
 
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => handleSave('submitted')}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-600 hover:from-sky-600 hover:to-cyan-700 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-sky-500/25 transition-all cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-600 hover:from-sky-600 hover:to-cyan-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-sky-500/25 transition-all cursor-pointer"
                 >
-                  <Send className="w-4 h-4" />
-                  <span>إرسال للمراجعة</span>
+                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  <span>{isSubmitting ? 'جارٍ الحفظ في Supabase...' : 'إرسال للمراجعة'}</span>
                 </button>
               </>
             )}
