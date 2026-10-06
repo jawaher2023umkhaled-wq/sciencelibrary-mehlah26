@@ -35,16 +35,16 @@ export const ReviewWorkflowPage: React.FC<ReviewWorkflowPageProps> = ({
   const [selectedRes, setSelectedRes] = useState<ResourceItem | null>(null);
   const [reviewAction, setReviewAction] = useState<ResourceStatus | null>(null);
   const [commentText, setCommentText] = useState('');
-  const [filterTab, setFilterTab] = useState<'all' | 'submitted' | 'under_review' | 'needs_revision' | 'approved'>('all');
+  const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'submitted' | 'under_review' | 'needs_revision' | 'approved'>('all');
   const [expandedNotesId, setExpandedNotesId] = useState<string | null>(null);
 
   // Filter items in review queue
   const queueItems = resources.filter(r => {
-    if (filterTab === 'submitted') return r.status === 'submitted';
+    if (filterTab === 'submitted' || filterTab === 'pending') return r.status === 'submitted' || r.status === 'pending';
     if (filterTab === 'under_review') return r.status === 'under_review';
     if (filterTab === 'needs_revision') return r.status === 'needs_revision';
     if (filterTab === 'approved') return r.status === 'approved';
-    return r.status === 'submitted' || r.status === 'under_review' || r.status === 'needs_revision' || r.status === 'approved';
+    return r.status === 'pending' || r.status === 'submitted' || r.status === 'under_review' || r.status === 'needs_revision' || r.status === 'approved';
   });
 
   const openActionDialog = (res: ResourceItem, action: ResourceStatus) => {
@@ -112,12 +112,12 @@ export const ReviewWorkflowPage: React.FC<ReviewWorkflowPageProps> = ({
             الكل ({resources.filter(r => r.status !== 'published' && r.status !== 'draft').length})
           </button>
           <button
-            onClick={() => setFilterTab('submitted')}
+            onClick={() => setFilterTab('pending')}
             className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-              filterTab === 'submitted' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              filterTab === 'pending' || filterTab === 'submitted' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            جديد للمراجعة ({resources.filter(r => r.status === 'submitted').length})
+            قيد المراجعة ({resources.filter(r => r.status === 'pending' || r.status === 'submitted').length})
           </button>
           <button
             onClick={() => setFilterTab('under_review')}
@@ -178,7 +178,7 @@ export const ReviewWorkflowPage: React.FC<ReviewWorkflowPageProps> = ({
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-base font-bold text-slate-900">{res.title}</h3>
                       <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                        res.status === 'submitted'
+                        res.status === 'pending' || res.status === 'submitted'
                           ? 'bg-amber-100 text-amber-800 border border-amber-200'
                           : res.status === 'under_review'
                           ? 'bg-sky-100 text-sky-800 border border-sky-200'
@@ -188,7 +188,7 @@ export const ReviewWorkflowPage: React.FC<ReviewWorkflowPageProps> = ({
                           ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                           : 'bg-slate-100 text-slate-700'
                       }`}>
-                        {res.status === 'submitted' ? 'تم الإرسال للمراجعة' : res.status === 'under_review' ? 'قيد المراجعة الفعالة' : res.status === 'needs_revision' ? 'يحتاج إلى تعديل' : res.status === 'approved' ? 'معتمد' : 'مسودة'}
+                        {res.status === 'pending' || res.status === 'submitted' ? 'قيد المراجعة' : res.status === 'under_review' ? 'قيد المراجعة الفعالة' : res.status === 'needs_revision' ? 'يحتاج إلى تعديل' : res.status === 'approved' ? 'معتمد' : 'مسودة'}
                       </span>
                     </div>
 
@@ -238,8 +238,8 @@ export const ReviewWorkflowPage: React.FC<ReviewWorkflowPageProps> = ({
                     </button>
                   )}
 
-                  {/* Start Review (moves from submitted to under_review) */}
-                  {res.status === 'submitted' && (
+                  {/* Start Review (moves from pending/submitted to under_review) */}
+                  {(res.status === 'submitted' || res.status === 'pending') && (
                     <button
                       onClick={() => handleStartReview(res.id)}
                       className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"

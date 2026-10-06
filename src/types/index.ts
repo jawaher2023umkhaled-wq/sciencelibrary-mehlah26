@@ -120,7 +120,8 @@ export interface UserProfile {
 export type ResourceStatus =
   | 'draft'           // مسودة
   | 'submitted'       // تم الإرسال للمراجعة
-  | 'under_review'    // قيد المراجعة
+  | 'pending'         // قيد المراجعة / معلق
+  | 'under_review'    // قيد المراجعة الفعالة
   | 'approved'        // معتمد
   | 'published'       // منشور
   | 'rejected'        // مرفوض
@@ -210,6 +211,11 @@ export interface ResourceItem {
   topicId?: string;
   authorId: string;
   authorName: string;
+  author?: string; // Optional author alias
+  user_id?: string; // Authenticated user ID for Supabase persistence & ownership
+  thumbnail_url?: string; // Explicit thumbnail URL for Supabase
+  image_url?: string; // Alternate image URL alias for Supabase
+  units?: UnitItem[] | string[]; // Fallback units array alias
   status: ResourceStatus;
   version: string;
   tags: string[];

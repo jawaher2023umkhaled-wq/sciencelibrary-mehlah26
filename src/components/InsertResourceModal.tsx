@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import { useAuth } from '../context/AuthContext';
 import { useResources } from '../context/ResourceContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
-import { ResourceItem, SupportingFile, PreviewType } from '../types';
+import { ResourceItem, SupportingFile, PreviewType, ResourceStatus } from '../types';
 import { ErrorBoundary } from './ErrorBoundary';
 import {
   X,
@@ -186,7 +186,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   // STEP 3: إعدادات المورد
   const [version, setVersion] = useState('الإصدار 1.0');
   const [usageRights, setUsageRights] = useState('جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)');
-  const [targetStatus, setTargetStatus] = useState<'draft' | 'submitted'>('submitted');
+  const [targetStatus, setTargetStatus] = useState<'draft' | 'pending' | 'submitted'>('pending');
   const [allowDownload, setAllowDownload] = useState(true);
   const [allowPreview, setAllowPreview] = useState(true);
   const [usageContext, setUsageContext] = useState('استخدام مخبري وتطبيقي');
@@ -208,7 +208,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       setTags(Array.isArray(resourceToEdit.tags) ? resourceToEdit.tags.filter(t => typeof t === 'string' && t.trim().length > 0) : ['علوم', 'تفاعلي']);
       setEducationalObjectives(Array.isArray(resourceToEdit.educationalObjectives) ? resourceToEdit.educationalObjectives.filter(Boolean) : []);
       setScientificConcepts(Array.isArray(resourceToEdit.scientificConcepts) ? resourceToEdit.scientificConcepts.filter(Boolean) : []);
-      setThumbnailUrl(resourceToEdit.thumbnailUrl || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
+      setThumbnailUrl(resourceToEdit.thumbnailUrl || (resourceToEdit as any).thumbnail_url || (resourceToEdit as any).image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
       setHtmlContent(resourceToEdit.htmlContent || resourceToEdit.html_content || '');
       setFileName(resourceToEdit.fileName || '');
       setFileSize(resourceToEdit.fileSize || '');
@@ -220,7 +220,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       setAllowPreview(resourceToEdit.allowPreview ?? true);
       setUsageContext(resourceToEdit.usageContext || 'استخدام مخبري وتطبيقي');
       setExecutionTime(resourceToEdit.executionTime || '45 دقيقة (حصة دراسية)');
-      setTargetStatus(resourceToEdit.status === 'draft' ? 'draft' : 'submitted');
+      setTargetStatus(resourceToEdit.status === 'draft' ? 'draft' : 'pending');
       setCurrentStep(1);
       setValidationError('');
     } else {
@@ -253,7 +253,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       setAllowPreview(true);
       setUsageContext('استخدام مخبري وتطبيقي');
       setExecutionTime('45 دقيقة (حصة دراسية)');
-      setTargetStatus('submitted');
+      setTargetStatus('pending');
       setCurrentStep(1);
     }
   }, [resourceToEdit, isOpen, user]);
@@ -723,7 +723,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   /**
    * Final Submission / Save
    */
-  const handleSave = async (finalStatus: 'draft' | 'submitted') => {
+  const handleSave = async (finalStatus: 'draft' | 'pending' | 'submitted') => {
     const safeTitle = (title || '').trim();
     const safeDesc = (description || '').trim();
     if (!safeTitle) {
@@ -756,14 +756,18 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
 
     const authorName = (author || '').trim() || resourceToEdit?.authorName || user?.displayName || 'عضو هيئة التدريس';
     const authorId = resourceToEdit?.authorId || user?.id || 'guest-author';
+    const currentUserId = user?.id || (user as any)?.uid || authorId;
 
     const finalHtml = htmlContent || undefined;
     const finalFileUrl = finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined);
+    const effectiveThumb = thumbnailUrl || (resourceToEdit as any)?.thumbnail_url || (resourceToEdit as any)?.image_url || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80';
 
     const resourceDataRecord = {
       title: safeTitle,
       authorName,
       authorId,
+      author: authorName,
+      user_id: currentUserId,
       description: safeDesc,
       gradeId,
       gradeName: selectedGrade?.name || 'الصف العاشر',
@@ -783,7 +787,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       tags: Array.isArray(tags) ? tags : ['علوم', 'تفاعلي'],
       educationalObjectives: Array.isArray(educationalObjectives) ? educationalObjectives : [],
       scientificConcepts: Array.isArray(scientificConcepts) ? scientificConcepts : [],
-      thumbnailUrl: thumbnailUrl || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80',
+      thumbnailUrl: effectiveThumb,
+      thumbnail_url: effectiveThumb,
+      image_url: effectiveThumb,
       fileName: fileName || `${safeTitle}.html`,
       fileSize: fileSize || '1.0 MB',
       fileType: fileType || (finalHtml ? '.html' : undefined),
@@ -802,20 +808,37 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     };
 
     if (resourceToEdit) {
+      const isReviewSubmit = finalStatus === 'submitted' || finalStatus === 'pending';
+      const resolvedStatus: ResourceStatus = isReviewSubmit
+        ? 'pending'
+        : (resourceToEdit.status === 'needs_revision' ? 'needs_revision' : finalStatus);
+
       updateResource(resourceToEdit.id, {
         ...resourceDataRecord,
-        status: finalStatus === 'submitted' ? 'submitted' : (resourceToEdit.status === 'needs_revision' ? 'needs_revision' : finalStatus),
+        thumbnailUrl: effectiveThumb,
+        thumbnail_url: effectiveThumb,
+        image_url: effectiveThumb,
+        status: resolvedStatus,
+        user_id: currentUserId,
         updatedAt: new Date().toISOString()
       });
       onClose();
     } else {
       setIsSubmitting(true);
       try {
+        const isReviewSubmit = finalStatus === 'submitted' || finalStatus === 'pending';
+        const resolvedStatus: ResourceStatus = isReviewSubmit ? 'pending' : finalStatus;
+
         const saved = await createResource({
           ...resourceDataRecord,
+          thumbnailUrl: effectiveThumb,
+          thumbnail_url: effectiveThumb,
+          image_url: effectiveThumb,
           authorId,
           authorName,
-          status: finalStatus
+          author: authorName,
+          user_id: currentUserId,
+          status: resolvedStatus
         });
         if (saved) {
           onClose();
@@ -1595,11 +1618,11 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                     حالة المورد المستهدفة
                   </label>
                   <select
-                    value={targetStatus}
-                    onChange={(e) => setTargetStatus(e.target.value as 'draft' | 'submitted')}
+                    value={targetStatus === 'submitted' ? 'pending' : targetStatus}
+                    onChange={(e) => setTargetStatus(e.target.value as 'draft' | 'pending')}
                     className="w-full px-3.5 py-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs font-semibold focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
                   >
-                    <option value="submitted">إرسال للمراجعة (Submitted for Academic Review)</option>
+                    <option value="pending">إرسال للمراجعة (قيد المراجعة - Academic Review)</option>
                     <option value="draft">حفظ كمسودة خاصة (Draft)</option>
                   </select>
                 </div>
@@ -1718,9 +1741,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                         {resourceType}
                       </span>
                       <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                        targetStatus === 'submitted' ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700'
+                        targetStatus === 'pending' || targetStatus === 'submitted' ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700'
                       }`}>
-                        {targetStatus === 'submitted' ? 'سيتم إرساله للمراجعة' : 'سيحفظ كمسودة'}
+                        {targetStatus === 'pending' || targetStatus === 'submitted' ? 'سيتم إرساله للمراجعة (قيد المراجعة)' : 'سيحفظ كمسودة'}
                       </span>
                     </div>
 
@@ -1858,7 +1881,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  onClick={() => handleSave('submitted')}
+                  onClick={() => handleSave('pending')}
                   className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-600 hover:from-sky-600 hover:to-cyan-700 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-md shadow-sky-500/25 transition-all cursor-pointer"
                 >
                   {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

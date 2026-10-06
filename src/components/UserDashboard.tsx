@@ -59,7 +59,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   );
 
   const publishedCount = userResources.filter(r => r.status === 'published').length;
-  const underReviewCount = userResources.filter(r => r.status === 'submitted' || r.status === 'under_review').length;
+  const underReviewCount = userResources.filter(r => r.status === 'pending' || r.status === 'submitted' || r.status === 'under_review').length;
   const draftsCount = userResources.filter(r => r.status === 'draft').length;
   const needsRevisionCount = userResources.filter(r => r.status === 'needs_revision').length;
 
@@ -68,14 +68,14 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
   const filteredMyResources = userResources.filter(r => {
     if (statusFilter === 'published') return r.status === 'published';
-    if (statusFilter === 'under_review') return r.status === 'submitted' || r.status === 'under_review';
+    if (statusFilter === 'under_review') return r.status === 'pending' || r.status === 'submitted' || r.status === 'under_review';
     if (statusFilter === 'draft') return r.status === 'draft';
     if (statusFilter === 'needs_revision') return r.status === 'needs_revision';
     return true;
   });
 
   const handleSubmitDraft = (res: ResourceItem) => {
-    updateResource(res.id, { status: 'submitted' });
+    updateResource(res.id, { status: 'pending', user_id: user?.id });
     showToast('تم إرسال المورد للمراجعة بنجاح', 'success');
   };
 

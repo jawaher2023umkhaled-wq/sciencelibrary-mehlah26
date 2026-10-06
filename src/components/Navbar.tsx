@@ -52,7 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   // Count pending items for review
   const pendingReviewCount = resources.filter(
-    r => r.status === 'submitted' || r.status === 'under_review'
+    r => r.status === 'pending' || r.status === 'submitted' || r.status === 'under_review'
   ).length;
 
   const handleNav = (tab: string) => {

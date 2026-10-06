@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { ResourceItem, PreviewType, ResourceStatus } from '../types';
 import { getSimulationContent } from '../data/simulations';
+import { storageService } from './storageService';
 
 /**
  * Validates whether a string is a standard RFC4122 v4 UUID.
@@ -25,39 +26,47 @@ export function generateUuid(): string {
 }
 
 /**
- * Transforms a frontend ResourceItem into the EXACT columns present in `public.resources`:
- * Columns: (id: UUID, title: text, description: text, type: text, subject: text, grade: text, url: text, created_at: timestamptz)
+ * Helper to gracefully retry Supabase queries if optional columns are not yet in the database schema.
  */
-export function toSupabaseRow(item: ResourceItem): {
-  id: string;
-  title: string;
-  description: string;
-  type: string;
-  subject: string;
-  grade: string;
-  url: string;
-  download_url?: string;
-  created_at: string;
-} {
+async function executeWithSchemaFallback(
+  action: (row: Record<string, unknown>) => PromiseLike<{ data: any; error: any }>,
+  initialRow: Record<string, unknown>
+): Promise<{ data: any; error: any }> {
+  let row = { ...initialRow };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const res = await action(row);
+    if (!res.error) return res;
+    if (res.error.code === 'PGRST204' && typeof res.error.message === 'string') {
+      const match = res.error.message.match(/'([^']+)' column/);
+      if (match && match[1] && match[1] in row) {
+        delete row[match[1]];
+        continue;
+      }
+    }
+    return res;
+  }
+  return await action(row);
+}
+
+/**
+ * Transforms a frontend ResourceItem into columns for `public.resources`:
+ */
+export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
   const id = isValidUuid(item.id) ? item.id : generateUuid();
 
-  // Requirement 3: Ensure that when a resource with an uploaded .html file is saved to Supabase,
-  // its HTML content or its Supabase Storage public file URL is properly saved to the database record.
   const rawHtml = item.htmlContent || item.html_content;
   let url = item.fileUrl || item.file_url || '';
 
   if (rawHtml && rawHtml.trim().length > 0) {
-    // If HTML code or simulation package is present, always store it encoded into url
     if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
       url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
     }
   } else if (!url || url.startsWith('https://images.unsplash.com')) {
-    // Check if there is built-in simulation code for this resource
     const builtinSim = getSimulationContent(item);
     if (builtinSim) {
       url = 'data:text/html;charset=utf-8,' + encodeURIComponent(builtinSim);
     } else {
-      url = item.thumbnailUrl || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+      url = item.thumbnailUrl || item.thumbnail_url || item.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
     }
   }
 
@@ -65,7 +74,11 @@ export function toSupabaseRow(item: ResourceItem): {
     ? item.fileUrl
     : (url.startsWith('http') ? url : undefined);
 
-  return {
+  const thumb = item.thumbnailUrl || item.thumbnail_url || item.image_url || (url.startsWith('http') && !url.includes('.html') ? url : undefined);
+  const status = item.status === 'submitted' ? 'pending' : (item.status || 'pending');
+  const userId = item.user_id || item.authorId || undefined;
+
+  const row: Record<string, unknown> = {
     id,
     title: item.title || 'مورد تعليمي بدون عنوان',
     description: item.description || '',
@@ -73,9 +86,18 @@ export function toSupabaseRow(item: ResourceItem): {
     subject: item.subjectName || 'العلوم',
     grade: item.gradeName || 'الصف الخامس',
     url,
-    ...(downloadUrl ? { download_url: downloadUrl } : {}),
     created_at: item.createdAt || new Date().toISOString()
   };
+
+  if (downloadUrl) row.download_url = downloadUrl;
+  if (thumb) {
+    row.thumbnail_url = thumb;
+    row.image_url = thumb;
+  }
+  if (status) row.status = status;
+  if (userId) row.user_id = userId;
+
+  return row;
 }
 
 /**
@@ -145,9 +167,19 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     fileUrl = `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}`;
   }
 
-  const thumbnailUrl = isRawUrlImage
-    ? rawUrl
-    : 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+  // Check local cache for fallback data if column is not yet in Supabase table
+  const existingLocal = typeof window !== 'undefined' ? storageService.getResourceById(id) : undefined;
+
+  const rawThumbnailField = row.thumbnail_url || row.image_url || row.thumbnail;
+  const thumbnailUrl = rawThumbnailField
+    ? String(rawThumbnailField)
+    : (existingLocal?.thumbnailUrl || (isRawUrlImage ? rawUrl : 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80'));
+
+  const rowStatus = row.status ? String(row.status) : undefined;
+  const status: ResourceStatus = (rowStatus as ResourceStatus) || existingLocal?.status || 'published';
+  const userId = row.user_id ? String(row.user_id) : (existingLocal?.user_id || undefined);
+  const authorId = row.author_id ? String(row.author_id) : (userId || existingLocal?.authorId || 'admin');
+  const authorName = row.author_name ? String(row.author_name) : (existingLocal?.authorName || 'مكتبة العلوم الرقمية');
 
   const typeLower = type.toLowerCase();
   const isInteractiveType =
@@ -164,6 +196,8 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     title,
     description,
     thumbnailUrl,
+    thumbnail_url: thumbnailUrl,
+    image_url: thumbnailUrl,
     fileUrl: fileUrl || (extractedHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}` : undefined),
     file_url: fileUrl,
     htmlContent: extractedHtml,
@@ -176,24 +210,28 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     gradeName: grade,
     gradeId: 'grade-' + grade,
     subjectId: 'subject-' + subject,
-    curriculum: 'منهج سلطنة عُمان المعتمد',
-    unit: 'الوحدة التعليمية',
+    curriculum: existingLocal?.curriculum || 'منهج سلطنة عُمان المعتمد',
+    unit: existingLocal?.unit || 'الوحدة التعليمية',
     topic: title,
-    authorId: 'admin',
-    authorName: 'مكتبة العلوم الرقمية',
-    status: 'published' as ResourceStatus,
-    version: '1.0',
-    tags: [subject, grade, type],
-    ratingAverage: 5,
-    ratingCount: 1,
-    usageCount: 0,
-    downloadCount: 0,
+    user_id: userId,
+    authorId,
+    authorName,
+    author: authorName,
+    status,
+    version: existingLocal?.version || '1.0',
+    tags: Array.isArray(existingLocal?.tags) && existingLocal.tags.length > 0 ? existingLocal.tags : [subject, grade, type],
+    supportingFiles: existingLocal?.supportingFiles || [],
+    units: existingLocal?.units || [],
+    ratingAverage: existingLocal?.ratingAverage ?? 5,
+    ratingCount: existingLocal?.ratingCount ?? 1,
+    usageCount: existingLocal?.usageCount ?? 0,
+    downloadCount: existingLocal?.downloadCount ?? 0,
     previewType: isInteractiveType ? 'html' : 'document',
-    allowDownload: true,
-    allowPreview: true,
+    allowDownload: existingLocal?.allowDownload ?? true,
+    allowPreview: existingLocal?.allowPreview ?? true,
     createdAt,
-    updatedAt: createdAt,
-    publishedAt: createdAt
+    updatedAt: existingLocal?.updatedAt || createdAt,
+    publishedAt: status === 'published' ? createdAt : undefined
   };
 }
 
@@ -246,17 +284,45 @@ export const supabaseResourceService = {
   },
 
   /**
+   * Fetch resources pending review from Supabase `resources` table.
+   */
+  async fetchPendingResources(): Promise<{ data: ResourceItem[]; isLive: boolean; error?: string }> {
+    try {
+      const { data, error } = await supabase
+        .from('resources')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase fetchPendingResources error:', error);
+        return { data: [], isLive: false, error: error.message };
+      }
+
+      if (data) {
+        const mapped = data.map((row: Record<string, unknown>) => fromSupabaseRow(row));
+        const pending = mapped.filter(r => r && (r.status === 'pending' || r.status === 'submitted' || r.status === 'under_review'));
+        return { data: pending, isLive: true };
+      }
+
+      return { data: [], isLive: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Supabase fetchPendingResources exception:', message);
+      return { data: [], isLive: false, error: message };
+    }
+  },
+
+  /**
    * Create a new resource directly in Supabase `resources` table.
    */
   async createResource(item: ResourceItem): Promise<{ data: ResourceItem | null; savedToSupabase: boolean; error?: string }> {
     const row = toSupabaseRow(item);
 
     try {
-      const { data, error } = await supabase
-        .from('resources')
-        .insert(row)
-        .select()
-        .maybeSingle();
+      const { data, error } = await executeWithSchemaFallback(
+        (targetRow) => supabase.from('resources').insert(targetRow).select().maybeSingle(),
+        row
+      );
 
       if (error) {
         console.error('Supabase INSERT rejected:', error);
@@ -264,7 +330,16 @@ export const supabaseResourceService = {
       }
 
       if (data) {
-        return { data: fromSupabaseRow(data as Record<string, unknown>), savedToSupabase: true };
+        const mapped = fromSupabaseRow(data as Record<string, unknown>);
+        // Ensure thumbnail, status, and user_id are not lost
+        if (item.thumbnailUrl) {
+          mapped.thumbnailUrl = item.thumbnailUrl;
+          mapped.thumbnail_url = item.thumbnailUrl;
+          mapped.image_url = item.thumbnailUrl;
+        }
+        if (item.status) mapped.status = item.status;
+        if (item.user_id) mapped.user_id = item.user_id;
+        return { data: mapped, savedToSupabase: true };
       }
 
       return { data: item, savedToSupabase: true };
@@ -293,20 +368,36 @@ export const supabaseResourceService = {
     if (updates.subjectName !== undefined) partialRow.subject = updates.subjectName;
     if (updates.gradeName !== undefined) partialRow.grade = updates.gradeName;
 
+    // Save updated thumbnail URL to thumbnail_url and image_url columns
+    const effectiveThumb = updates.thumbnailUrl || updates.thumbnail_url || updates.image_url;
+    if (effectiveThumb !== undefined) {
+      partialRow.thumbnail_url = effectiveThumb;
+      partialRow.image_url = effectiveThumb;
+    }
+
+    // Save updated status and user_id
+    if (updates.status !== undefined) {
+      partialRow.status = updates.status === 'submitted' ? 'pending' : updates.status;
+    }
+    if (updates.user_id !== undefined) {
+      partialRow.user_id = updates.user_id;
+    }
+
     // Requirement 3: Save updated HTML content or file URL to the database record
     if (updates.htmlContent !== undefined && updates.htmlContent.trim().length > 0) {
       partialRow.url = 'data:text/html;charset=utf-8,' + encodeURIComponent(updates.htmlContent);
-    } else if (updates.fileUrl !== undefined || updates.thumbnailUrl !== undefined) {
-      partialRow.url = updates.fileUrl || updates.thumbnailUrl || '';
+    } else if (updates.fileUrl !== undefined) {
+      partialRow.url = updates.fileUrl;
+    } else if (effectiveThumb !== undefined) {
+      // If no fileUrl or htmlContent, update url to the thumbnail image
+      partialRow.url = effectiveThumb;
     }
 
     try {
-      const { data, error } = await supabase
-        .from('resources')
-        .update(partialRow)
-        .eq('id', id)
-        .select()
-        .maybeSingle();
+      const { data, error } = await executeWithSchemaFallback(
+        (targetRow) => supabase.from('resources').update(targetRow).eq('id', id).select().maybeSingle(),
+        partialRow
+      );
 
       if (error) {
         console.error('Supabase UPDATE rejected:', error);
@@ -314,7 +405,17 @@ export const supabaseResourceService = {
       }
 
       if (data) {
-        return { data: fromSupabaseRow(data as Record<string, unknown>), savedToSupabase: true };
+        const mapped = fromSupabaseRow(data as Record<string, unknown>);
+        // Guarantee that the new thumbnail, status, and updates are preserved immediately in the return
+        if (effectiveThumb) {
+          mapped.thumbnailUrl = effectiveThumb;
+          mapped.thumbnail_url = effectiveThumb;
+          mapped.image_url = effectiveThumb;
+        }
+        if (updates.status) {
+          mapped.status = updates.status === 'submitted' ? 'pending' : updates.status;
+        }
+        return { data: { ...mapped, ...updates, ...(effectiveThumb ? { thumbnailUrl: effectiveThumb, thumbnail_url: effectiveThumb, image_url: effectiveThumb } : {}) }, savedToSupabase: true };
       }
 
       return { data: null, savedToSupabase: true };

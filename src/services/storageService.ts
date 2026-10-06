@@ -121,16 +121,31 @@ export const storageService = {
     const newId = generateUuid();
     const now = new Date().toISOString();
 
+    const isPendingReview = resource.status === 'pending' || resource.status === 'submitted';
+    const effectiveStatus: ResourceStatus = isPendingReview ? 'pending' : (resource.status || 'pending');
+    const effectiveUserId = resource.user_id || resource.authorId || 'admin';
+    const effectiveThumb = resource.thumbnailUrl || resource.thumbnail_url || resource.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+
     const newResource: ResourceItem = {
       ...resource,
       id: newId,
+      status: effectiveStatus,
+      user_id: effectiveUserId,
+      authorId: resource.authorId || effectiveUserId,
+      authorName: resource.authorName || (resource as any).author || 'مكتبة العلوم الرقمية',
+      author: (resource as any).author || resource.authorName,
+      thumbnailUrl: effectiveThumb,
+      thumbnail_url: effectiveThumb,
+      image_url: effectiveThumb,
+      tags: Array.isArray(resource.tags) ? resource.tags : [],
+      supportingFiles: Array.isArray(resource.supportingFiles) ? resource.supportingFiles : [],
       ratingAverage: 0,
       ratingCount: 0,
       usageCount: 0,
       downloadCount: 0,
       createdAt: now,
       updatedAt: now,
-      publishedAt: resource.status === 'published' ? now : undefined,
+      publishedAt: effectiveStatus === 'published' ? now : undefined,
       versions: [
         {
           versionNumber: resource.version || 'الإصدار 1.0',
@@ -147,21 +162,21 @@ export const storageService = {
 
     // Audit log
     this.addAuditLog({
-      actorId: resource.authorId,
-      userId: resource.authorId,
+      actorId: effectiveUserId,
+      userId: effectiveUserId,
       actorName: resource.authorName,
-      action: resource.status === 'submitted' ? 'submit' : 'create',
+      action: isPendingReview ? 'submit' : 'create',
       resourceId: newId,
       resourceTitle: resource.title,
-      details: resource.status === 'submitted' ? 'إنشاء المورد وإرساله للتحكيم' : 'إنشاء مسودة مورد جديد'
+      details: isPendingReview ? 'إنشاء المورد وإرساله للتحكيم (قيد المراجعة)' : 'إنشاء مسودة مورد جديد'
     });
 
-    // Notify author if created
-    if (resource.status === 'submitted') {
+    // Notify author if created for review
+    if (isPendingReview) {
       this.addNotification({
-        userId: resource.authorId,
+        userId: effectiveUserId,
         title: 'تم إرسال المورد للمراجعة',
-        message: `تم استلام المورد "${resource.title}" بنجاح وإحالته إلى لجنة التحكيم الأكاديمية.`,
+        message: `تم استلام المورد "${resource.title}" بنجاح وحالته الآن قيد المراجعة لدى لجنة التحكيم الأكاديمية.`,
         resourceId: newId,
         type: 'info'
       });
@@ -179,11 +194,28 @@ export const storageService = {
     const existing = list[index];
     const now = new Date().toISOString();
 
+    const isPendingReview = updates.status === 'pending' || updates.status === 'submitted';
+    const effectiveStatus: ResourceStatus = isPendingReview
+      ? 'pending'
+      : (updates.status !== undefined ? updates.status : existing.status);
+
+    const effectiveThumb = updates.thumbnailUrl || updates.thumbnail_url || updates.image_url || existing.thumbnailUrl;
+    const effectiveUserId = updates.user_id || existing.user_id || existing.authorId;
+
     const updatedResource: ResourceItem = {
       ...existing,
       ...updates,
+      status: effectiveStatus,
+      user_id: effectiveUserId,
+      authorId: updates.authorId || existing.authorId || effectiveUserId,
+      authorName: updates.authorName || existing.authorName,
+      thumbnailUrl: effectiveThumb,
+      thumbnail_url: effectiveThumb,
+      image_url: effectiveThumb,
+      tags: Array.isArray(updates.tags) ? updates.tags : (existing.tags || []),
+      supportingFiles: Array.isArray(updates.supportingFiles) ? updates.supportingFiles : (existing.supportingFiles || []),
       updatedAt: now,
-      publishedAt: updates.status === 'published' && !existing.publishedAt ? now : (updates.publishedAt || existing.publishedAt)
+      publishedAt: effectiveStatus === 'published' && !existing.publishedAt ? now : (updates.publishedAt || existing.publishedAt)
     };
 
     list[index] = updatedResource;
@@ -191,26 +223,33 @@ export const storageService = {
 
     // Audit log
     this.addAuditLog({
-      actorId: existing.authorId,
-      userId: existing.authorId,
+      actorId: effectiveUserId,
+      userId: effectiveUserId,
       actorName: existing.authorName,
-      action: updates.status === 'submitted' ? 'submit' : 'update',
+      action: isPendingReview ? 'submit' : 'update',
       resourceId: id,
       resourceTitle: updatedResource.title,
-      details: updates.status === 'submitted' ? 'إعادة إرسال المورد للمراجعة' : 'تحديث بيانات المورد'
+      details: isPendingReview ? 'إعادة إرسال المورد للمراجعة (قيد المراجعة)' : 'تحديث بيانات المورد'
     });
 
-    if (updates.status === 'submitted' && existing.status !== 'submitted') {
+    if (isPendingReview && existing.status !== 'pending' && existing.status !== 'submitted') {
       this.addNotification({
-        userId: existing.authorId,
+        userId: effectiveUserId,
         title: 'تمت إعادة إرسال المورد للمراجعة',
-        message: `تم إرسال التعديلات على مورد "${existing.title}" إلى لجنة التحكيم.`,
+        message: `تم إرسال التعديلات على مورد "${existing.title}" إلى لجنة التحكيم وحالته الآن قيد المراجعة.`,
         resourceId: id,
         type: 'info'
       });
     }
 
     return updatedResource;
+  },
+
+  // Query resources pending review
+  getPendingResources(): ResourceItem[] {
+    return this.getResources().filter(
+      r => r && (r.status === 'pending' || r.status === 'submitted' || r.status === 'under_review')
+    );
   },
 
   // Unpublish resource back to approved

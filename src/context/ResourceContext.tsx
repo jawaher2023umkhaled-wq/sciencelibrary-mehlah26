@@ -335,23 +335,36 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const createResource = async (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>): Promise<ResourceItem | null> => {
     const newId = generateUuid();
     const now = new Date().toISOString();
+    const isPendingReview = resourceData.status === 'pending' || resourceData.status === 'submitted';
+    const effectiveStatus: ResourceStatus = isPendingReview ? 'pending' : (resourceData.status || 'pending');
+    const effectiveUserId = (resourceData as any).user_id || resourceData.authorId || user?.id || 'admin';
+    const effectiveThumb = resourceData.thumbnailUrl || (resourceData as any).thumbnail_url || (resourceData as any).image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+
     const preparedResource: ResourceItem = {
       ...resourceData,
       id: newId,
+      status: effectiveStatus,
+      user_id: effectiveUserId,
+      authorId: resourceData.authorId || effectiveUserId,
+      authorName: resourceData.authorName || user?.displayName || 'مكتبة العلوم الرقمية',
+      author: (resourceData as any).author || resourceData.authorName || user?.displayName,
+      thumbnailUrl: effectiveThumb,
+      thumbnail_url: effectiveThumb,
+      image_url: effectiveThumb,
       ratingAverage: 0,
       ratingCount: 0,
       usageCount: 0,
       downloadCount: 0,
       createdAt: now,
       updatedAt: now,
-      publishedAt: resourceData.status === 'published' ? now : undefined,
+      publishedAt: effectiveStatus === 'published' ? now : undefined,
       versions: [
         {
           versionNumber: resourceData.version || 'الإصدار 1.0',
           fileUrl: resourceData.fileUrl,
           changeNotes: 'الإنشاء الأولي للمورد',
           createdAt: now,
-          createdBy: resourceData.authorName
+          createdBy: resourceData.authorName || user?.displayName || 'مكتبة العلوم الرقمية'
         }
       ]
     };
@@ -370,21 +383,21 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // Audit log
       storageService.addAuditLog({
-        actorId: resourceData.authorId,
-        userId: resourceData.authorId,
-        actorName: resourceData.authorName,
-        action: resourceData.status === 'submitted' ? 'submit' : 'create',
+        actorId: effectiveUserId,
+        userId: effectiveUserId,
+        actorName: preparedResource.authorName,
+        action: isPendingReview ? 'submit' : 'create',
         resourceId: savedRecord.id,
         resourceTitle: savedRecord.title,
-        details: resourceData.status === 'submitted' ? 'إنشاء المورد وإرساله للتحكيم' : 'إنشاء مسودة مورد جديد'
+        details: isPendingReview ? 'إنشاء المورد وإرساله للتحكيم (قيد المراجعة)' : 'إنشاء مسودة مورد جديد'
       });
 
       // Notification
-      if (resourceData.status === 'submitted') {
+      if (isPendingReview) {
         const notifPayload = {
-          userId: resourceData.authorId,
+          userId: effectiveUserId,
           title: 'تم إرسال المورد للمراجعة',
-          message: `تم استلام المورد "${savedRecord.title}" بنجاح وإحالته إلى لجنة التحكيم الأكاديمية.`,
+          message: `تم استلام المورد "${savedRecord.title}" بنجاح وإحالته إلى لجنة التحكيم وحالته الآن قيد المراجعة.`,
           resourceId: savedRecord.id,
           type: 'info' as const
         };
@@ -408,21 +421,58 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateResource = (id: string, updates: Partial<ResourceItem>) => {
     const previousResource = resources.find(r => r.id === id);
-    const updated = storageService.updateResource(id, updates);
+
+    const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
+    const isPendingReview = updates.status === 'pending' || updates.status === 'submitted';
+    const effectiveStatus: ResourceStatus | undefined = isPendingReview ? 'pending' : updates.status;
+    const effectiveUserId = (updates as any).user_id || user?.id;
+
+    const normalizedUpdates: Partial<ResourceItem> = {
+      ...updates,
+      ...(effectiveStatus !== undefined ? { status: effectiveStatus } : {}),
+      ...(effectiveUserId ? { user_id: effectiveUserId } : {}),
+      ...(effectiveThumb ? {
+        thumbnailUrl: effectiveThumb,
+        thumbnail_url: effectiveThumb,
+        image_url: effectiveThumb
+      } : {})
+    };
+
+    // 1. Immediately update local storage
+    const updated = storageService.updateResource(id, normalizedUpdates);
+
+    // 2. Immediately update local React state so UI reflects new thumbnail and data without page refresh
     if (updated) {
-      setResources(prev => prev.map(r => r.id === id ? updated : r));
+      setResources(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
       if (activeResource && activeResource.id === id) {
-        setActiveResource(updated);
+        setActiveResource({ ...activeResource, ...updated });
+      }
+    } else {
+      setResources(prev => prev.map(r => r.id === id ? { ...r, ...normalizedUpdates } : r));
+      if (activeResource && activeResource.id === id) {
+        setActiveResource({ ...activeResource, ...normalizedUpdates });
       }
     }
     refreshNotifications();
 
-    // Direct persistence to Supabase resources table (Requirement #1 & #5)
-    supabaseResourceService.updateResource(id, updates).then(({ data: savedRecord, savedToSupabase, error }) => {
+    // 3. Direct persistence to Supabase resources table and sync
+    supabaseResourceService.updateResource(id, normalizedUpdates).then(({ data: savedRecord, savedToSupabase, error }) => {
       if (savedToSupabase) {
         setIsSupabaseLive(true);
         if (savedRecord) {
-          setResources(prev => prev.map(r => r.id === id ? { ...r, ...savedRecord } : r));
+          // Keep updated thumbnail in React state even if database doesn't echo it
+          const finalRecord = {
+            ...savedRecord,
+            ...(effectiveThumb ? {
+              thumbnailUrl: effectiveThumb,
+              thumbnail_url: effectiveThumb,
+              image_url: effectiveThumb
+            } : {})
+          };
+          setResources(prev => prev.map(r => r.id === id ? { ...r, ...finalRecord } : r));
+          if (activeResource && activeResource.id === id) {
+            setActiveResource(prev => prev ? { ...prev, ...finalRecord } : null);
+          }
         }
         showToast('تم تحديث المورد ومزامنته مع Supabase بنجاح', 'success');
       } else {
@@ -430,6 +480,9 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // Revert on failure
         if (previousResource) {
           setResources(prev => prev.map(r => r.id === id ? previousResource : r));
+          if (activeResource && activeResource.id === id) {
+            setActiveResource(previousResource);
+          }
         }
         showToast(`فشل تحديث المورد في Supabase: ${error || 'تحقق من الصلاحيات'}`, 'error');
       }

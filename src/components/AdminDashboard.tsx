@@ -130,7 +130,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Resource Import Center states (Requirements #2, #6, #7)
   const [resourceSearchQuery, setResourceSearchQuery] = useState('');
-  const [resourceStatusFilter, setResourceStatusFilter] = useState<'all' | 'published' | 'submitted' | 'needs_revision' | 'draft' | 'archived'>('all');
+  const [resourceStatusFilter, setResourceStatusFilter] = useState<'all' | 'published' | 'pending' | 'submitted' | 'needs_revision' | 'draft' | 'archived'>('all');
   const [resourceGradeFilter, setResourceGradeFilter] = useState('');
   const [resourceSubjectFilter, setResourceSubjectFilter] = useState('');
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
@@ -146,7 +146,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       // Status filter
       if (resourceStatusFilter !== 'all') {
         if (resourceStatusFilter === 'published' && res.status !== 'published') return false;
-        if (resourceStatusFilter === 'submitted' && res.status !== 'submitted' && res.status !== 'under_review') return false;
+        if ((resourceStatusFilter === 'pending' || resourceStatusFilter === 'submitted') &&
+            res.status !== 'pending' && res.status !== 'submitted' && res.status !== 'under_review') return false;
         if (resourceStatusFilter === 'needs_revision' && res.status !== 'needs_revision') return false;
         if (resourceStatusFilter === 'draft' && res.status !== 'draft') return false;
         if (resourceStatusFilter === 'archived' && res.status !== 'archived') return false;
@@ -346,7 +347,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const safeResources = (resources || []).filter(Boolean);
   const totalResources = safeResources.length;
   const publishedCount = safeResources.filter(r => r && r.status === 'published').length;
-  const underReviewCount = safeResources.filter(r => r && (r.status === 'submitted' || r.status === 'under_review')).length;
+  const underReviewCount = safeResources.filter(r => r && (r.status === 'pending' || r.status === 'submitted' || r.status === 'under_review')).length;
   const draftsCount = safeResources.filter(r => r && r.status === 'draft').length;
   const needsRevisionCount = safeResources.filter(r => r && r.status === 'needs_revision').length;
 
@@ -739,13 +740,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </button>
 
             <button
-              onClick={() => setResourceStatusFilter('submitted')}
+              onClick={() => setResourceStatusFilter('pending')}
               className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
-                resourceStatusFilter === 'submitted' ? 'bg-amber-600 text-white shadow-2xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                resourceStatusFilter === 'pending' || resourceStatusFilter === 'submitted' ? 'bg-amber-600 text-white shadow-2xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span>بانتظار المراجعة</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${resourceStatusFilter === 'submitted' ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800'}`}>
+              <span>قيد المراجعة</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${resourceStatusFilter === 'pending' || resourceStatusFilter === 'submitted' ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800'}`}>
                 {underReviewCount}
               </span>
             </button>
@@ -939,7 +940,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-block ${
                               res.status === 'published'
                                 ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                : res.status === 'submitted' || res.status === 'under_review'
+                                : res.status === 'pending' || res.status === 'submitted' || res.status === 'under_review'
                                 ? 'bg-amber-100 text-amber-800 border border-amber-200'
                                 : res.status === 'needs_revision'
                                 ? 'bg-orange-100 text-orange-800 border border-orange-200'
@@ -951,8 +952,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             }`}>
                               {res.status === 'published'
                                 ? '✓ منشور'
-                                : res.status === 'submitted'
-                                ? '⏳ بانتظار المراجعة'
+                                : res.status === 'pending' || res.status === 'submitted'
+                                ? '⏳ قيد المراجعة'
                                 : res.status === 'under_review'
                                 ? '🔍 قيد التدقيق'
                                 : res.status === 'needs_revision'
@@ -2770,8 +2771,8 @@ CREATE POLICY "Authenticated users can delete resources" ON public.resources FOR
 
                     // Step 2: Submit for review
                     setTimeout(() => {
-                      updateResource(testRes.id, { status: 'submitted' });
-                      showToast('الخطوة 2: تم إرسال المورد للمراجعة', 'info');
+                      updateResource(testRes.id, { status: 'pending', user_id: user?.id });
+                      showToast('الخطوة 2: تم إرسال المورد للمراجعة (حالة: قيد المراجعة)', 'info');
                     }, 500);
 
                     // Step 3: Reviewer review & return for revision with comment
@@ -2783,10 +2784,11 @@ CREATE POLICY "Authenticated users can delete resources" ON public.resources FOR
                     // Step 4: User updates and resubmits
                     setTimeout(() => {
                       updateResource(testRes.id, {
-                        status: 'submitted',
+                        status: 'pending',
+                        user_id: user?.id,
                         description: 'مورد تجريبي معدّل ومطابق للمعايير للتحقق من دورة إدراج ومراجعة ونشر الموارد.'
                       });
-                      showToast('الخطوة 4: تم تعديل المورد وإعادة إرساله', 'info');
+                      showToast('الخطوة 4: تم تعديل المورد وإعادة إرساله (حالة: قيد المراجعة)', 'info');
                     }, 1500);
 
                     // Step 5: Reviewer approves
