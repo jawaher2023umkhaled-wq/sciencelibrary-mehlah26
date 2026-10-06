@@ -3,6 +3,7 @@ import { useResources } from '../context/ResourceContext';
 import { useAuth } from '../context/AuthContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
 import { UserRole, isAdminRole, getRoleArabicLabel, GradeItem, SubjectItem, UnitItem, TopicItem, CurriculumItem, ResourceItem, isResourceInteractive } from '../types';
+import { ErrorBoundary } from './ErrorBoundary';
 import {
   ShieldCheck,
   FileText,
@@ -139,7 +140,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Computed filtered resources for Admin Resource Management Center
   const adminFilteredResources = useMemo(() => {
-    return resources.filter(res => {
+    return (resources || []).filter(res => {
+      if (!res) return false;
+
       // Status filter
       if (resourceStatusFilter !== 'all') {
         if (resourceStatusFilter === 'published' && res.status !== 'published') return false;
@@ -156,14 +159,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (resourceSubjectFilter && res.subjectId !== resourceSubjectFilter) return false;
 
       // Search query
-      if (resourceSearchQuery.trim()) {
+      if (resourceSearchQuery && resourceSearchQuery.trim()) {
         const q = resourceSearchQuery.trim().toLowerCase();
-        const matchesTitle = res.title.toLowerCase().includes(q);
-        const matchesTopic = (res.topic || '').toLowerCase().includes(q);
-        const matchesUnit = (res.unit || '').toLowerCase().includes(q);
-        const matchesAuthor = (res.authorName || '').toLowerCase().includes(q);
-        const matchesType = (res.resourceType || '').toLowerCase().includes(q);
-        const matchesTags = (res.tags || []).some(t => t.toLowerCase().includes(q));
+        const matchesTitle = String(res.title || '').toLowerCase().includes(q);
+        const matchesTopic = String(res.topic || '').toLowerCase().includes(q);
+        const matchesUnit = String(res.unit || '').toLowerCase().includes(q);
+        const matchesAuthor = String(res.authorName || '').toLowerCase().includes(q);
+        const matchesType = String(res.resourceType || res.type || '').toLowerCase().includes(q);
+        const matchesTags = Array.isArray(res.tags) && res.tags.some(t => typeof t === 'string' && t.toLowerCase().includes(q));
         if (!matchesTitle && !matchesTopic && !matchesUnit && !matchesAuthor && !matchesType && !matchesTags) {
           return false;
         }
@@ -336,30 +339,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
 
   // Dynamic entities fallback to initial if empty
-  const effectiveGrades = grades.length > 0 ? grades : GRADES;
-  const effectiveSubjects = subjects.length > 0 ? subjects : SUBJECTS;
+  const effectiveGrades = (grades && grades.length > 0 ? grades : GRADES) || GRADES;
+  const effectiveSubjects = (subjects && subjects.length > 0 ? subjects : SUBJECTS) || SUBJECTS;
 
-  // Compute real dynamic statistics (no hardcoded numbers)
-  const totalResources = resources.length;
-  const publishedCount = resources.filter(r => r.status === 'published').length;
-  const underReviewCount = resources.filter(r => r.status === 'submitted' || r.status === 'under_review').length;
-  const draftsCount = resources.filter(r => r.status === 'draft').length;
-  const needsRevisionCount = resources.filter(r => r.status === 'needs_revision').length;
+  // Compute real dynamic statistics safely
+  const safeResources = (resources || []).filter(Boolean);
+  const totalResources = safeResources.length;
+  const publishedCount = safeResources.filter(r => r && r.status === 'published').length;
+  const underReviewCount = safeResources.filter(r => r && (r.status === 'submitted' || r.status === 'under_review')).length;
+  const draftsCount = safeResources.filter(r => r && r.status === 'draft').length;
+  const needsRevisionCount = safeResources.filter(r => r && r.status === 'needs_revision').length;
 
-  const totalUsage = resources.reduce((acc, curr) => acc + (curr.usageCount || 0), 0);
-  const totalDownloads = resources.reduce((acc, curr) => acc + (curr.downloadCount || 0), 0);
-  const totalRatings = resources.reduce((acc, curr) => acc + (curr.ratingCount || 0), 0);
+  const totalUsage = safeResources.reduce((acc, curr) => acc + (curr?.usageCount || 0), 0);
+  const totalDownloads = safeResources.reduce((acc, curr) => acc + (curr?.downloadCount || 0), 0);
+  const totalRatings = safeResources.reduce((acc, curr) => acc + (curr?.ratingCount || 0), 0);
 
   // Distribution by Grade
   const gradeDistribution = effectiveGrades.map(g => ({
-    name: g.name,
-    count: resources.filter(r => r.gradeId === g.id).length
+    name: g?.name || 'صف دراسي',
+    count: safeResources.filter(r => r && r.gradeId === g?.id).length
   }));
 
   // Distribution by Subject
   const subjectDistribution = effectiveSubjects.map(s => ({
-    name: s.name,
-    count: resources.filter(r => r.subjectId === s.id).length
+    name: s?.name || 'مادة علمية',
+    count: safeResources.filter(r => r && r.subjectId === s?.id).length
   }));
 
   const handleSaveAdminEmail = (e: React.FormEvent) => {
@@ -370,7 +374,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   return (
-    <div className="py-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-in fade-in">
+    <ErrorBoundary title="لوحة الإدارة والتحكم الشامل للمنصة">
+      <div className="py-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-in fade-in">
       
       {/* Admin Header */}
       <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -390,7 +395,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           {onOpenInsertModal && (
             <button
-              onClick={onOpenInsertModal}
+              onClick={() => {
+                try {
+                  onOpenInsertModal();
+                } catch (err) {
+                  console.error('Failed to open insert modal:', err);
+                }
+              }}
               className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-sky-500 via-indigo-600 to-purple-600 hover:from-sky-600 hover:to-purple-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-indigo-500/20 hover:shadow-lg transition-all cursor-pointer shrink-0"
             >
               <Plus className="w-4 h-4" />
@@ -660,7 +671,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="flex flex-wrap items-center gap-2.5">
               {onOpenInsertModal && (
                 <button
-                  onClick={onOpenInsertModal}
+                  onClick={() => {
+                    try {
+                      onOpenInsertModal();
+                    } catch (err) {
+                      console.error('Failed to open insert modal:', err);
+                    }
+                  }}
                   className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-600 hover:from-sky-600 hover:to-cyan-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-sky-500/20 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -851,7 +868,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <p className="text-xs text-slate-400">جرب تعديل كلمات البحث أو اختيار صف ومادة أخرى.</p>
                 {onOpenInsertModal && (
                   <button
-                    onClick={onOpenInsertModal}
+                    onClick={() => {
+                      try {
+                        onOpenInsertModal();
+                      } catch (err) {
+                        console.error('Failed to open insert modal:', err);
+                      }
+                    }}
                     className="mt-2 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
@@ -875,18 +898,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {adminFilteredResources.map((res) => {
+                      if (!res) return null;
                       const isInteractive = isResourceInteractive(res);
                       return (
-                        <tr key={res.id} className="hover:bg-slate-50/70 transition-colors">
+                        <tr key={res.id || Math.random()} className="hover:bg-slate-50/70 transition-colors">
                           <td className="p-4">
                             <div className="flex items-center gap-3">
                               <img
-                                src={res.thumbnailUrl}
-                                alt={res.title}
+                                src={res.thumbnailUrl || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80'}
+                                alt={res.title || 'مورد تعليمي'}
                                 className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0"
                               />
                               <div className="min-w-0">
-                                <p className="font-bold text-slate-900 truncate max-w-xs sm:max-w-md">{res.title}</p>
+                                <p className="font-bold text-slate-900 truncate max-w-xs sm:max-w-md">{res.title || 'مورد تعليمي'}</p>
                                 <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
                                   <span className="font-semibold text-slate-500">{res.version || 'الإصدار 1.0'}</span>
                                   <span>•</span>
@@ -897,18 +921,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </td>
 
                           <td className="p-4 whitespace-nowrap">
-                            <span className="font-semibold text-slate-800">{res.gradeName}</span>
-                            <span className="text-slate-400 block text-[11px]">{res.subjectName}</span>
+                            <span className="font-semibold text-slate-800">{res.gradeName || 'صف غير محدد'}</span>
+                            <span className="text-slate-400 block text-[11px]">{res.subjectName || 'مادة غير محددة'}</span>
                           </td>
 
                           <td className="p-4 whitespace-nowrap">
                             <span className="bg-slate-100 px-2.5 py-1 rounded-lg text-slate-700 font-semibold block w-fit">
-                              {res.resourceType}
+                              {res.resourceType || res.type || 'محاكاة'}
                             </span>
                           </td>
 
                           <td className="p-4 text-slate-700 font-medium whitespace-nowrap">
-                            {res.authorName}
+                            {res.authorName || 'مكتبة العلوم'}
                           </td>
 
                           <td className="p-4 whitespace-nowrap">
@@ -954,7 +978,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               {/* 1. Edit Resource */}
                               {onEditResource && (
                                 <button
-                                  onClick={() => onEditResource(res)}
+                                  onClick={() => {
+                                    try {
+                                      if (res) onEditResource(res);
+                                    } catch (err) {
+                                      console.error('Failed to trigger onEditResource:', err);
+                                    }
+                                  }}
                                   title="تعديل المورد"
                                   className="p-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer border border-indigo-200"
                                 >
@@ -3052,7 +3082,13 @@ CREATE POLICY "Authenticated users can delete resources" ON public.resources FOR
                     onClick={() => {
                       const res = qualityChecklistResource;
                       setQualityChecklistResource(null);
-                      onEditResource(res);
+                      if (res) {
+                        try {
+                          onEditResource(res);
+                        } catch (err) {
+                          console.error('Failed to trigger onEditResource:', err);
+                        }
+                      }
                     }}
                     className="px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer border border-indigo-200"
                   >
@@ -3176,6 +3212,7 @@ CREATE POLICY "Authenticated users can delete resources" ON public.resources FOR
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 };

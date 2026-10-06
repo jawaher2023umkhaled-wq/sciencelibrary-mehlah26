@@ -2,8 +2,9 @@ import React, { useState, useEffect, useId } from 'react';
 import JSZip from 'jszip';
 import { useAuth } from '../context/AuthContext';
 import { useResources } from '../context/ResourceContext';
-import { GRADES, SUBJECTS } from '../data/initialData';
+import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
 import { ResourceItem, SupportingFile, PreviewType } from '../types';
+import { ErrorBoundary } from './ErrorBoundary';
 import {
   X,
   UploadCloud,
@@ -54,6 +55,37 @@ const ALLOWED_PACKAGE_EXTENSIONS = [
   '.txt', '.csv', '.xml', '.md'
 ];
 
+/**
+ * Normalizes grade identifier safely against known grades.
+ */
+const normalizeGradeId = (gradeId?: string | null, gradeName?: string | null): string => {
+  const text = `${gradeId || ''} ${gradeName || ''}`.toLowerCase();
+  if (text.includes('12') || text.includes('ثاني عشر') || text.includes('الثاني عشر')) return 'grade-12';
+  if (text.includes('11') || text.includes('حادي عشر') || text.includes('الحادي عشر')) return 'grade-11';
+  if (text.includes('10') || text.includes('عاشر') || text.includes('العاشر')) return 'grade-10';
+  if (text.includes('9') || text.includes('تاسع') || text.includes('التاسع')) return 'grade-9';
+  if (text.includes('8') || text.includes('ثامن') || text.includes('الثامن')) return 'grade-8';
+  if (text.includes('7') || text.includes('سابع') || text.includes('السابع')) return 'grade-7';
+  if (text.includes('6') || text.includes('سادس') || text.includes('السادس')) return 'grade-6';
+  if (text.includes('5') || text.includes('خامس') || text.includes('الخامس')) return 'grade-5';
+  if (gradeId && GRADES.some(g => g.id === gradeId)) return gradeId;
+  return 'grade-10';
+};
+
+/**
+ * Normalizes subject identifier safely against known subjects.
+ */
+const normalizeSubjectId = (subjectId?: string | null, subjectName?: string | null): string => {
+  const text = `${subjectId || ''} ${subjectName || ''}`.toLowerCase();
+  if (text.includes('chem') || text.includes('كيمياء')) return 'chemistry';
+  if (text.includes('phys') || text.includes('فيزياء')) return 'physics';
+  if (text.includes('bio') || text.includes('أحياء') || text.includes('احياء')) return 'biology';
+  if (text.includes('env') || text.includes('بيئ')) return 'environmental-science';
+  if (text.includes('sci') || text.includes('علوم')) return 'general-science';
+  if (subjectId && SUBJECTS.some(s => s.id === subjectId)) return subjectId;
+  return 'chemistry';
+};
+
 export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   isOpen,
   onClose,
@@ -73,8 +105,15 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     showToast
   } = useResources();
 
-  const effectiveGrades = grades && grades.length > 0 ? grades.filter(g => g.isActive !== false) : GRADES;
-  const effectiveSubjects = subjects && subjects.length > 0 ? subjects.filter(s => s.isActive !== false) : SUBJECTS;
+  const effectiveGrades = (grades && grades.length > 0 ? grades.filter(g => g && g.isActive !== false) : GRADES) || GRADES;
+  const effectiveSubjects = (subjects && subjects.length > 0 ? subjects.filter(s => s && s.isActive !== false) : SUBJECTS) || SUBJECTS;
+  const effectiveResourceTypes = (resourceTypes && resourceTypes.length > 0 ? resourceTypes : RESOURCE_TYPES) || RESOURCE_TYPES;
+  const safeCurricula = Array.isArray(curricula) && curricula.length > 0 ? curricula : [
+    { id: 'om-camb-1', name: 'سلطنة عمان - كامبريدج' },
+    { id: 'om-gen-1', name: 'المنهج العماني العام' }
+  ];
+  const safeUnits = Array.isArray(units) ? units : [];
+  const safeTopics = Array.isArray(topics) ? topics : [];
 
   const fileInputId = useId();
   const coverImageInputId = useId();
@@ -131,10 +170,15 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   const [potentialDuplicates, setPotentialDuplicates] = useState<ResourceItem[]>([]);
 
   useEffect(() => {
-    if (!resourceToEdit && title.trim().length >= 4) {
-      const dups = findPotentialDuplicates(title.trim(), fileName, fileSize);
-      setPotentialDuplicates(dups);
-    } else {
+    try {
+      if (!resourceToEdit && title && title.trim().length >= 4 && typeof findPotentialDuplicates === 'function') {
+        const dups = findPotentialDuplicates(title.trim(), fileName, fileSize);
+        setPotentialDuplicates(Array.isArray(dups) ? dups : []);
+      } else {
+        setPotentialDuplicates([]);
+      }
+    } catch (err) {
+      console.warn('Duplicate detection check notice:', err);
       setPotentialDuplicates([]);
     }
   }, [title, fileName, fileSize, resourceToEdit, findPotentialDuplicates]);
@@ -151,25 +195,25 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   // Load existing data if editing
   useEffect(() => {
     if (resourceToEdit) {
-      setTitle(resourceToEdit.title);
+      setTitle(resourceToEdit.title || '');
       setAuthor(resourceToEdit.authorName || user?.displayName || '');
-      setDescription(resourceToEdit.description);
-      setGradeId(resourceToEdit.gradeId);
-      setSubjectId(resourceToEdit.subjectId);
+      setDescription(resourceToEdit.description || '');
+      setGradeId(normalizeGradeId(resourceToEdit.gradeId, resourceToEdit.gradeName));
+      setSubjectId(normalizeSubjectId(resourceToEdit.subjectId, resourceToEdit.subjectName));
       setCurriculum(resourceToEdit.curriculum || 'سلطنة عمان - كامبريدج');
       setUnit(resourceToEdit.unit || '');
       setTopic(resourceToEdit.topic || '');
-      setResourceType(resourceToEdit.resourceType);
+      setResourceType(resourceToEdit.resourceType || resourceToEdit.type || 'محاكاة');
       setCategory(resourceToEdit.category || 'تجربة واستقصاء علمي');
-      setTags(resourceToEdit.tags || []);
-      setEducationalObjectives(resourceToEdit.educationalObjectives || []);
-      setScientificConcepts(resourceToEdit.scientificConcepts || []);
-      setThumbnailUrl(resourceToEdit.thumbnailUrl);
-      setHtmlContent(resourceToEdit.htmlContent || '');
+      setTags(Array.isArray(resourceToEdit.tags) ? resourceToEdit.tags.filter(t => typeof t === 'string' && t.trim().length > 0) : ['علوم', 'تفاعلي']);
+      setEducationalObjectives(Array.isArray(resourceToEdit.educationalObjectives) ? resourceToEdit.educationalObjectives.filter(Boolean) : []);
+      setScientificConcepts(Array.isArray(resourceToEdit.scientificConcepts) ? resourceToEdit.scientificConcepts.filter(Boolean) : []);
+      setThumbnailUrl(resourceToEdit.thumbnailUrl || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
+      setHtmlContent(resourceToEdit.htmlContent || resourceToEdit.html_content || '');
       setFileName(resourceToEdit.fileName || '');
       setFileSize(resourceToEdit.fileSize || '');
       setFileType(resourceToEdit.fileType || '');
-      setSupportingFiles(resourceToEdit.supportingFiles || []);
+      setSupportingFiles(Array.isArray(resourceToEdit.supportingFiles) ? resourceToEdit.supportingFiles.filter(Boolean) : []);
       setVersion(resourceToEdit.version || 'الإصدار 1.0');
       setUsageRights(resourceToEdit.usageRights || 'جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)');
       setAllowDownload(resourceToEdit.allowDownload ?? true);
@@ -212,16 +256,17 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       setTargetStatus('submitted');
       setCurrentStep(1);
     }
-  }, [resourceToEdit, isOpen]);
+  }, [resourceToEdit, isOpen, user]);
 
   if (!isOpen) return null;
 
-  // Filter valid subjects for selected grade
-  const validSubjects = SUBJECTS.filter(s => s.grades.includes(gradeId));
+  // Filter valid subjects for selected grade safely
+  const validSubjects = (effectiveSubjects || []).filter(s => s && (!s.grades || s.grades.length === 0 || s.grades.includes(gradeId)));
+  const displaySubjects = validSubjects.length > 0 ? validSubjects : (effectiveSubjects || SUBJECTS);
 
   const handleGradeChange = (newGradeId: string) => {
     setGradeId(newGradeId);
-    const sub = SUBJECTS.filter(s => s.grades.includes(newGradeId));
+    const sub = (effectiveSubjects || []).filter(s => s && (!s.grades || s.grades.length === 0 || s.grades.includes(newGradeId)));
     if (sub.length > 0 && !sub.some(s => s.id === subjectId)) {
       setSubjectId(sub[0].id);
     }
@@ -679,13 +724,14 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
    * Final Submission / Save
    */
   const handleSave = async (finalStatus: 'draft' | 'submitted') => {
-    // Validation
-    if (!title.trim()) {
+    const safeTitle = (title || '').trim();
+    const safeDesc = (description || '').trim();
+    if (!safeTitle) {
       setValidationError('يرجى إدخال عنوان المورد.');
       setCurrentStep(1);
       return;
     }
-    if (!description.trim()) {
+    if (!safeDesc) {
       setValidationError('يرجى إدخال وصف المورد.');
       setCurrentStep(1);
       return;
@@ -701,58 +747,58 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       return;
     }
 
-    const selectedGrade = effectiveGrades.find(g => g.id === gradeId);
-    const selectedSubject = effectiveSubjects.find(s => s.id === subjectId);
-    const matchedCurric = curricula.find(c => c.name === curriculum || c.id === resourceToEdit?.curriculumId);
-    const matchedUnit = units.find(u => u.name === unit.trim());
-    const matchedTopic = topics.find(t => t.name === topic.trim());
-    const matchedType = resourceTypes.find(t => t.name === resourceType);
+    const selectedGrade = (effectiveGrades || []).find(g => g && g.id === gradeId);
+    const selectedSubject = (displaySubjects || []).find(s => s && s.id === subjectId);
+    const matchedCurric = (safeCurricula || []).find(c => c && (c.name === curriculum || c.id === resourceToEdit?.curriculumId));
+    const matchedUnit = (safeUnits || []).find(u => u && u.name === (unit || '').trim());
+    const matchedTopic = (safeTopics || []).find(t => t && t.name === (topic || '').trim());
+    const matchedType = (effectiveResourceTypes || []).find(t => t && t.name === resourceType);
 
-    const authorName = author.trim() || resourceToEdit?.authorName || user?.displayName || 'عضو هيئة التدريس';
+    const authorName = (author || '').trim() || resourceToEdit?.authorName || user?.displayName || 'عضو هيئة التدريس';
     const authorId = resourceToEdit?.authorId || user?.id || 'guest-author';
 
     const finalHtml = htmlContent || undefined;
     const finalFileUrl = finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined);
 
     const resourceDataRecord = {
-      title: title.trim(),
+      title: safeTitle,
       authorName,
       authorId,
-      description: description.trim(),
+      description: safeDesc,
       gradeId,
       gradeName: selectedGrade?.name || 'الصف العاشر',
       subjectId,
       subjectName: selectedSubject?.name || 'الكيمياء',
-      curriculum,
+      curriculum: curriculum || 'سلطنة عمان - كامبريدج',
       curriculumId: matchedCurric?.id || resourceToEdit?.curriculumId,
-      unit: unit.trim() || 'الوحدة التعليمية العامة',
+      unit: (unit || '').trim() || 'الوحدة التعليمية العامة',
       unitId: matchedUnit?.id || resourceToEdit?.unitId,
-      topic: topic.trim() || title.trim(),
+      topic: (topic || '').trim() || safeTitle,
       topicId: matchedTopic?.id || resourceToEdit?.topicId,
-      resourceType,
-      type: resourceType,
+      resourceType: resourceType || 'محاكاة',
+      type: resourceType || 'محاكاة',
       resourceTypeId: matchedType?.id || resourceToEdit?.resourceTypeId,
-      category,
-      pedagogicalCategory: category,
-      tags,
-      educationalObjectives,
-      scientificConcepts,
+      category: category || 'تجربة واستقصاء علمي',
+      pedagogicalCategory: category || 'تجربة واستقصاء علمي',
+      tags: Array.isArray(tags) ? tags : ['علوم', 'تفاعلي'],
+      educationalObjectives: Array.isArray(educationalObjectives) ? educationalObjectives : [],
+      scientificConcepts: Array.isArray(scientificConcepts) ? scientificConcepts : [],
       thumbnailUrl: thumbnailUrl || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80',
-      fileName: fileName || `${title}.html`,
+      fileName: fileName || `${safeTitle}.html`,
       fileSize: fileSize || '1.0 MB',
       fileType: fileType || (finalHtml ? '.html' : undefined),
       fileUrl: finalFileUrl,
       file_url: finalFileUrl,
       htmlContent: finalHtml,
       html_content: finalHtml,
-      supportingFiles,
-      version,
-      usageRights,
-      allowDownload,
-      allowPreview,
-      usageContext,
-      executionTime,
-      previewType: ((finalHtml || resourceType.includes('محاكاة') || fileType === '.html' || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation')) ? 'html' : 'document') as PreviewType
+      supportingFiles: Array.isArray(supportingFiles) ? supportingFiles : [],
+      version: version || 'الإصدار 1.0',
+      usageRights: usageRights || 'جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)',
+      allowDownload: allowDownload ?? true,
+      allowPreview: allowPreview ?? true,
+      usageContext: usageContext || 'استخدام مخبري وتطبيقي',
+      executionTime: executionTime || '45 دقيقة (حصة دراسية)',
+      previewType: ((finalHtml || (resourceType && (resourceType.includes('محاكاة') || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation'))) || fileType === '.html') ? 'html' : 'document') as PreviewType
     };
 
     if (resourceToEdit) {
@@ -787,7 +833,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-3 sm:p-6 overflow-y-auto animate-in fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[94vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+      <ErrorBoundary title="نموذج إدراج وتعديل المورد التعليمي" onReset={onClose}>
+        <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[94vh] flex flex-col overflow-hidden animate-in zoom-in-95">
         
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-sky-50 via-cyan-50 to-teal-50">
@@ -834,7 +881,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (title.trim() && description.trim()) setCurrentStep(2);
+                const sTitle = (title || '').trim();
+                const sDesc = (description || '').trim();
+                if (sTitle && sDesc) setCurrentStep(2);
                 else setValidationError('يرجى ملء عنوان ووصف المورد أولاً.');
               }}
               className={`flex items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 rounded-xl transition-all cursor-pointer ${
@@ -852,7 +901,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (title.trim() && description.trim()) setCurrentStep(3);
+                const sTitle = (title || '').trim();
+                const sDesc = (description || '').trim();
+                if (sTitle && sDesc) setCurrentStep(3);
                 else setValidationError('يرجى ملء عنوان ووصف المورد أولاً.');
               }}
               className={`flex items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 rounded-xl transition-all cursor-pointer ${
@@ -870,7 +921,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (title.trim() && description.trim()) setCurrentStep(4);
+                const sTitle = (title || '').trim();
+                const sDesc = (description || '').trim();
+                if (sTitle && sDesc) setCurrentStep(4);
                 else setValidationError('يرجى ملء عنوان ووصف المورد أولاً.');
               }}
               className={`flex items-center justify-center gap-1 sm:gap-1.5 py-2 px-1 rounded-xl transition-all cursor-pointer ${
@@ -1049,7 +1102,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                     onChange={(e) => setSubjectId(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 text-sm font-medium cursor-pointer"
                   >
-                    {validSubjects.map(s => (
+                    {displaySubjects.map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
@@ -1065,7 +1118,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                     onChange={(e) => setResourceType(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 rounded-xl border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 text-sm font-medium cursor-pointer"
                   >
-                    {resourceTypes.map(t => (
+                    {effectiveResourceTypes.map(t => (
                       <option key={t.id} value={t.name}>{t.name}</option>
                     ))}
                   </select>
@@ -1098,7 +1151,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                     onChange={(e) => setCurriculum(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
                   >
-                    {curricula.map(c => (
+                    {safeCurricula.map(c => (
                       <option key={c.id} value={c.name}>{c.name}</option>
                     ))}
                     <option value="منهج آخر">منهج آخر</option>
@@ -1116,8 +1169,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500"
                   />
                   <datalist id="units-datalist">
-                    {units
-                      .filter(u => u.gradeId === gradeId && u.subjectId === subjectId)
+                    {safeUnits
+                      .filter(u => u && u.gradeId === gradeId && u.subjectId === subjectId)
                       .map(u => (
                         <option key={u.id} value={u.name} />
                       ))}
@@ -1135,8 +1188,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 text-xs font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500"
                   />
                   <datalist id="topics-datalist">
-                    {topics
-                      .filter(t => !unit || units.find(u => u.name === unit)?.id === t.unitId)
+                    {safeTopics
+                      .filter(t => t && (!unit || safeUnits.find(u => u && u.name === unit)?.id === t.unitId))
                       .map(t => (
                         <option key={t.id} value={t.name} />
                       ))}
@@ -1656,10 +1709,10 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                   <div className="space-y-1.5 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold">
-                        {GRADES.find(g => g.id === gradeId)?.name || 'الصف العاشر'}
+                        {(effectiveGrades || []).find(g => g && g.id === gradeId)?.name || 'الصف العاشر'}
                       </span>
                       <span className="px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 text-[11px] font-bold">
-                        {SUBJECTS.find(s => s.id === subjectId)?.name || 'الكيمياء'}
+                        {(displaySubjects || []).find(s => s && s.id === subjectId)?.name || 'الكيمياء'}
                       </span>
                       <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
                         {resourceType}
@@ -1815,7 +1868,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
             )}
           </div>
         </div>
-      </div>
+        </div>
+      </ErrorBoundary>
     </div>
   );
 };

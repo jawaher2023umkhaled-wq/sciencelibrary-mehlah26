@@ -19,6 +19,7 @@ import { AboutModal } from './components/AboutModal';
 import { NotificationToast } from './components/NotificationToast';
 import { CurriculumExplorer } from './components/CurriculumExplorer';
 import { LoginPage } from './components/LoginPage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ResourceItem, isAdminRole } from './types';
 import { FlaskConical } from 'lucide-react';
 
@@ -155,6 +156,10 @@ const MainApp: React.FC = () => {
     if (!isAuthenticated || !user) {
       showToast('يرجى تسجيل الدخول لتعديل الموارد التعليمية', 'info');
       handleNavigate('login');
+      return;
+    }
+    if (!resource) {
+      showToast('تعذر فتح المورد للتعديل: بيانات المورد غير متوفرة', 'warning');
       return;
     }
     setEditingResource(resource);
@@ -395,14 +400,22 @@ const MainApp: React.FC = () => {
       />
 
       {/* Insert / Edit Resource Modal (Protected) */}
-      <InsertResourceModal
-        isOpen={isInsertModalOpen}
-        onClose={() => {
+      <ErrorBoundary
+        title="نافذة إدراج وتعديل المورد التعليمي"
+        onReset={() => {
           setIsInsertModalOpen(false);
           setEditingResource(null);
         }}
-        resourceToEdit={editingResource}
-      />
+      >
+        <InsertResourceModal
+          isOpen={isInsertModalOpen}
+          onClose={() => {
+            setIsInsertModalOpen(false);
+            setEditingResource(null);
+          }}
+          resourceToEdit={editingResource}
+        />
+      </ErrorBoundary>
 
       {/* Authentication Modal */}
       <AuthModal

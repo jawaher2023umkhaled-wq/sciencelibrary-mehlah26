@@ -1216,17 +1216,20 @@ export const storageService = {
   // Duplicate Detection Helper (Requirement #15)
   // ==========================================
   findPotentialDuplicates(title: string, fileName?: string, fileSize?: string): ResourceItem[] {
-    const resources = this.getResources();
+    if (!title || typeof title !== 'string') return [];
+    const resources = this.getResources() || [];
     const cleanTitle = title.trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه');
+    if (!cleanTitle) return [];
 
     return resources.filter(r => {
-      const rTitle = r.title.trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه');
+      if (!r || !r.title) return false;
+      const rTitle = String(r.title).trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه');
       // Exact or very close title match
       if (rTitle === cleanTitle) return true;
       if (rTitle.includes(cleanTitle) && cleanTitle.length > 5) return true;
       if (cleanTitle.includes(rTitle) && rTitle.length > 5) return true;
       // Matching filename
-      if (fileName && r.fileName && r.fileName.toLowerCase() === fileName.toLowerCase()) return true;
+      if (fileName && r.fileName && String(r.fileName).toLowerCase() === String(fileName).toLowerCase()) return true;
       return false;
     });
   },
