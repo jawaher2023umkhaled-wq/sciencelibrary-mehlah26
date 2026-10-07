@@ -40,15 +40,10 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [fetchedHtml, setFetchedHtml] = useState<string | null>(null);
 
-  // Pre-render validation to safely handle missing or null resource data
-  if (!isOpen || !resource || typeof resource !== 'object') {
-    return null;
-  }
+  // Check if resource is an interactive HTML simulation safely (unconditional Hook call)
+  const isInteractive = useMemo(() => Boolean(resource && typeof resource === 'object' && isResourceInteractive(resource)), [resource]);
 
-  // Check if resource is an interactive HTML simulation safely
-  const isInteractive = useMemo(() => Boolean(resource && isResourceInteractive(resource)), [resource]);
-
-  // Resolve HTML code from all possible sources:
+  // Resolve HTML code from all possible sources (unconditional Hook call):
   // 1. Direct htmlContent or html_content property
   // 2. data:text/html data URL in fileUrl, file_url, or url
   // 3. Raw HTML string inside fileUrl
@@ -58,7 +53,10 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     setFetchedHtml(null);
     setIsLoading(true);
 
-    if (!resource || !isOpen) return;
+    if (!resource || !isOpen || typeof resource !== 'object') {
+      setIsLoading(false);
+      return;
+    }
 
     // 1. Direct HTML content property
     const directHtml = resource.htmlContent || resource.html_content;
@@ -140,6 +138,35 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
 
     setIsLoading(false);
   }, [resource, isOpen]);
+
+  // If not open, safely return null AFTER all hooks have executed
+  if (!isOpen) {
+    return null;
+  }
+
+  // Safe fallback if open but resource object is missing or invalid
+  if (!resource || typeof resource !== 'object') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-in fade-in">
+        <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl p-6 sm:p-8 max-w-md w-full text-center space-y-4 shadow-2xl">
+          <div className="w-12 h-12 rounded-2xl bg-rose-900/50 text-rose-400 flex items-center justify-center mx-auto border border-rose-700/50">
+            <X className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-white">تعذر تشغيل المورد التعليمي</h3>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            بيانات المورد غير متوفرة أو لم يكتمل تحميلها من قاعدة البيانات.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors"
+          >
+            إغلاق المشغل
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleReload = () => {
     setIsLoading(true);
@@ -304,8 +331,8 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
               title={safeTitle}
               onLoad={() => setIsLoading(false)}
               className="w-full h-full border-none bg-slate-950"
-              // Security Sandbox allowing scripts, forms, and same-origin for simulations:
-              sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+              // Security Sandbox allowing scripts, forms, and popups for simulations in isolated opaque origin:
+              sandbox="allow-scripts allow-forms allow-popups"
             />
           </div>
 

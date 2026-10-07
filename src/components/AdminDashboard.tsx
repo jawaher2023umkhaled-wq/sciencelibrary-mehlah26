@@ -356,15 +356,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const totalRatings = safeResources.reduce((acc, curr) => acc + (curr?.ratingCount || 0), 0);
 
   // Distribution by Grade
-  const gradeDistribution = effectiveGrades.map(g => ({
+  const gradeDistribution = (effectiveGrades || []).map(g => ({
     name: g?.name || 'صف دراسي',
-    count: safeResources.filter(r => r && r.gradeId === g?.id).length
+    count: safeResources.filter(r => r && (r.gradeId === g?.id || r.gradeName === g?.name)).length
   }));
 
   // Distribution by Subject
-  const subjectDistribution = effectiveSubjects.map(s => ({
+  const subjectDistribution = (effectiveSubjects || []).map(s => ({
     name: s?.name || 'مادة علمية',
-    count: safeResources.filter(r => r && r.subjectId === s?.id).length
+    count: safeResources.filter(r => r && (r.subjectId === s?.id || r.subjectName === s?.name)).length
   }));
 
   const handleSaveAdminEmail = (e: React.FormEvent) => {
@@ -970,7 +970,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="text-[11px]">
                               <span>{res.usageCount || 0} استخدام</span>
                               <span className="text-slate-400 mx-1">•</span>
-                              <span className="text-amber-600">★ {res.ratingAverage || 'جديد'}</span>
+                              <span className="text-amber-600">★ {(res.ratingCount || 0) > 0 && (res.ratingAverage || 0) > 0 ? res.ratingAverage.toFixed(1) : 'جديد'}</span>
                             </div>
                           </td>
 

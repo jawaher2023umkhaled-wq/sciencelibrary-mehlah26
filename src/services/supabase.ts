@@ -53,8 +53,8 @@ export function sanitizeSupabaseKey(rawKey: unknown): string {
   return 'sb_publishable_qlE874cgvucAdoPOXJ0Aeg_0cuz1lKJ';
 }
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL;
-const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const rawUrl = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL : undefined;
+const rawKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_ANON_KEY : undefined;
 
 export const supabaseUrl = sanitizeSupabaseUrl(rawUrl);
 export const supabaseAnonKey = sanitizeSupabaseKey(rawKey);

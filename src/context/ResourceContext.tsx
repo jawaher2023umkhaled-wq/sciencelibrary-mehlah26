@@ -223,7 +223,8 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch (e) {
         console.warn('Failed to fetch notifications from Supabase:', e);
       }
-      setNotifications(storageService.getUserNotifications(user.id));
+      // Strictly do not display unverified localStorage notifications
+      setNotifications([]);
     } else {
       setNotifications([]);
     }

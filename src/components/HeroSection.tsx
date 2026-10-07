@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Compass,
   PlusCircle,
@@ -14,6 +14,7 @@ import {
   Filter
 } from 'lucide-react';
 import { GRADES, SUBJECTS } from '../data/initialData';
+import { useResources } from '../context/ResourceContext';
 
 interface HeroSectionProps {
   onExplore: () => void;
@@ -40,8 +41,30 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   gradesCount = 8,
   subjectsCount = 5
 }) => {
+  const { resources } = useResources();
   const [searchInput, setSearchInput] = useState('');
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
+
+  // Derive trending topics dynamically from real published resources
+  const trendingKeywords = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of resources || []) {
+      if (r && r.status === 'published') {
+        if (r.title) {
+          const stripped = r.title.replace(/^(محاكاة|استقصاء|تجربة|درس تفاعلي)\s+/, '').trim();
+          if (stripped && stripped.length <= 25) set.add(stripped);
+        }
+        if (r.topic && r.topic !== r.title && r.topic.length <= 25) {
+          set.add(r.topic);
+        }
+        if (r.subjectName && r.subjectName !== 'العلوم') {
+          set.add(r.subjectName);
+        }
+      }
+    }
+    const list = Array.from(set);
+    return list.length > 0 ? list.slice(0, 6) : ['نشاط الفلزات', 'نمو النبات', 'الانتشار', 'الكيمياء'];
+  }, [resources]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -195,7 +218,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
         {/* 4. الكلمات الشائعة (Trending Keywords) */}
         <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 mb-8 sm:mb-10 text-xs text-slate-500">
           <span className="font-bold text-slate-700 text-xs">موضوعات رائجة:</span>
-          {['رذرفورد', 'قانون أوم', 'نشاط الفلزات', 'الخلية', 'مربع بانيت', 'الجدول الدوري'].map(term => (
+          {trendingKeywords.map(term => (
             <button
               key={term}
               type="button"

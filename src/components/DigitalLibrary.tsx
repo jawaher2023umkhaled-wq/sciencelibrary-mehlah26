@@ -728,7 +728,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({
                       <td className="py-3 px-4 whitespace-nowrap">
                         <span className="text-amber-500 font-bold flex items-center gap-1">
                           <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                          <span>{resource.ratingAverage > 0 ? resource.ratingAverage : 'جديد'}</span>
+                          <span>{(resource.ratingCount || 0) > 0 && (resource.ratingAverage || 0) > 0 ? resource.ratingAverage.toFixed(1) : 'لا توجد تقييمات بعد'}</span>
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center whitespace-nowrap">
@@ -807,7 +807,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({
                     <span className="truncate max-w-[100px]">{resource.authorName}</span>
                     <span className="text-amber-500 font-bold flex items-center gap-0.5">
                       <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                      {resource.ratingAverage > 0 ? resource.ratingAverage : 'جديد'}
+                      {(resource.ratingCount || 0) > 0 && (resource.ratingAverage || 0) > 0 ? resource.ratingAverage.toFixed(1) : 'جديد'}
                     </span>
                   </div>
                 </div>

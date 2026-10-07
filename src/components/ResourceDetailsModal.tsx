@@ -63,9 +63,72 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
   const [showVersions, setShowVersions] = useState(false);
   const [showReviews, setShowReviews] = useState(false);
 
-  // Pre-render validation to safely handle missing or null resource data
-  if (!isOpen || !resource || typeof resource !== 'object') {
+  const isInteractive = useMemo(() => Boolean(resource && isResourceInteractive(resource)), [resource]);
+
+  const previewHtml = useMemo(() => {
+    if (!resource || typeof resource !== 'object') return null;
+    const directHtml = resource.htmlContent || resource.html_content;
+    if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) return directHtml;
+
+    const fileUrl = resource.fileUrl || resource.file_url || resource.url || '';
+    if (fileUrl.startsWith('data:text/html;charset=utf-8,')) {
+      try {
+        return decodeURIComponent(fileUrl.replace('data:text/html;charset=utf-8,', ''));
+      } catch {
+        return fileUrl;
+      }
+    }
+    if (fileUrl.startsWith('data:text/html;base64,')) {
+      try {
+        return decodeURIComponent(escape(atob(fileUrl.replace('data:text/html;base64,', ''))));
+      } catch {
+        try {
+          return atob(fileUrl.replace('data:text/html;base64,', ''));
+        } catch {
+          return null;
+        }
+      }
+    }
+    if (fileUrl.trim().startsWith('<!DOCTYPE html') || fileUrl.trim().startsWith('<html') || (fileUrl.includes('</') && fileUrl.includes('<script'))) {
+      return fileUrl;
+    }
+
+    const builtin = getSimulationContent(resource);
+    if (builtin) return builtin;
+
+    if (isInteractive) {
+      return generateInteractiveSimulationShell(resource);
+    }
     return null;
+  }, [resource, isInteractive]);
+
+  // Safe early exit if modal is not open, AFTER all hooks have executed
+  if (!isOpen) {
+    return null;
+  }
+
+  // Safe fallback if modal is open but resource object is missing or invalid
+  if (!resource || typeof resource !== 'object' || !resource.id) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4 animate-in fade-in">
+        <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full text-center space-y-4 shadow-2xl border border-slate-200">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200">
+            <X className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900">تعذر عرض تفاصيل المورد</h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            بيانات المورد غير متوفرة أو لم تكتمل عملية تحميلها من قاعدة البيانات.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors"
+          >
+            إغلاق النافذة
+          </button>
+        </div>
+      </div>
+    );
   }
 
   // Safe field extractions with robust fallbacks
@@ -107,46 +170,8 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
   const isFavorite = safeId ? (favorites || []).includes(safeId) : false;
   const recommended = safeId ? (getRecommendedResources?.(resource) || []) : [];
   const similar = safeId ? (getSimilarResources?.(resource) || []) : [];
-  const isInteractive = isResourceInteractive(resource);
   const isAuthor = user?.id === safeAuthorId || user?.displayName === safeAuthor || isAdminRole(user?.role);
   const canEdit = isAuthor && (resource?.status === 'draft' || resource?.status === 'needs_revision' || isAdminRole(user?.role));
-
-  const previewHtml = useMemo(() => {
-    if (!resource) return null;
-    const directHtml = resource.htmlContent || resource.html_content;
-    if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) return directHtml;
-
-    const fileUrl = resource.fileUrl || resource.file_url || resource.url || '';
-    if (fileUrl.startsWith('data:text/html;charset=utf-8,')) {
-      try {
-        return decodeURIComponent(fileUrl.replace('data:text/html;charset=utf-8,', ''));
-      } catch {
-        return fileUrl;
-      }
-    }
-    if (fileUrl.startsWith('data:text/html;base64,')) {
-      try {
-        return decodeURIComponent(escape(atob(fileUrl.replace('data:text/html;base64,', ''))));
-      } catch {
-        try {
-          return atob(fileUrl.replace('data:text/html;base64,', ''));
-        } catch {
-          return null;
-        }
-      }
-    }
-    if (fileUrl.trim().startsWith('<!DOCTYPE html') || fileUrl.trim().startsWith('<html') || (fileUrl.includes('</') && fileUrl.includes('<script'))) {
-      return fileUrl;
-    }
-
-    const builtin = getSimulationContent(resource);
-    if (builtin) return builtin;
-
-    if (isInteractive) {
-      return generateInteractiveSimulationShell(resource);
-    }
-    return null;
-  }, [resource, isInteractive]);
 
   const handleRate = (score: number) => {
     if (safeId) rateResource(safeId, score);
@@ -282,8 +307,10 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
                     <span className="text-xs text-slate-400 block font-medium">التقييم</span>
                     <div className="flex items-center justify-center gap-1 font-bold text-slate-800 text-sm mt-0.5">
                       <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                      <span>{(resource?.ratingAverage || 0) > 0 ? (resource.ratingAverage || 0).toFixed(1) : 'جديد'}</span>
-                      <span className="text-[11px] text-slate-400">({resource?.ratingCount || 0})</span>
+                      <span>{(resource?.ratingCount || 0) > 0 && (resource?.ratingAverage || 0) > 0 ? (resource.ratingAverage || 0).toFixed(1) : 'لا توجد تقييمات بعد'}</span>
+                      {(resource?.ratingCount || 0) > 0 && (
+                        <span className="text-[11px] text-slate-400">({resource.ratingCount})</span>
+                      )}
                     </div>
                   </div>
 
@@ -373,7 +400,7 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
                       src={!previewHtml && resource?.fileUrl && resource.fileUrl.startsWith('http') && !resource.fileUrl.startsWith('https://images.unsplash.com') ? resource.fileUrl : undefined}
                       title={safeTitle}
                       className="w-full h-full border-none bg-slate-950"
-                      sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+                      sandbox="allow-scripts allow-forms allow-popups"
                     />
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-2">
                       <span className="px-2.5 py-1 rounded-full bg-slate-900/90 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold flex items-center gap-1 shadow-md">
@@ -476,10 +503,12 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
                   <span className="font-bold text-slate-800">{safeCurriculum}</span>
                 </div>
 
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="text-xs text-slate-400 block mb-1">الوحدة التعليمية:</span>
-                  <span className="font-bold text-slate-800">{safeUnit || 'عام'}</span>
-                </div>
+                {safeUnit && safeUnit !== 'الوحدة التعليمية' && safeUnit !== 'عام' && (
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                    <span className="text-xs text-slate-400 block mb-1">الوحدة التعليمية:</span>
+                    <span className="font-bold text-slate-800">{safeUnit}</span>
+                  </div>
+                )}
 
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                   <span className="text-xs text-slate-400 block mb-1">الموضوع / الدرس:</span>

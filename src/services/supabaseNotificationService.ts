@@ -25,7 +25,11 @@ export const supabaseNotificationService = {
 
       if (!isAdmin) {
         // Normal users see their own notifications or global announcements ('all')
-        query = query.or(`user_id.eq.${userId},user_id.eq.${cleanEmail},user_id.eq.all`);
+        const filterParts = [`user_id.eq.${userId}`, 'user_id.eq.all'];
+        if (cleanEmail) {
+          filterParts.push(`user_id.eq.${cleanEmail}`);
+        }
+        query = query.or(filterParts.join(','));
       }
 
       const { data, error } = await query;
@@ -134,7 +138,27 @@ export const supabaseNotificationService = {
       const { error } = await supabase
         .from('notifications')
         .update({ is_read: true })
-        .or(`user_id.eq.${userId},user_id.eq.all`);
+        .eq('user_id', userId);
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
+    }
+  },
+
+  /**
+   * Delete a single notification from Supabase `public.notifications`
+   */
+  async deleteNotification(notificationId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', notificationId);
 
       if (error) {
         return { success: false, error: error.message };

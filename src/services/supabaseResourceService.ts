@@ -49,6 +49,37 @@ async function executeWithSchemaFallback(
 }
 
 /**
+ * Normalizes grade text to canonical grade ID and display name.
+ */
+export function normalizeGrade(gradeStr?: string | null): { gradeId: string; gradeName: string } {
+  if (!gradeStr) return { gradeId: 'grade-10', gradeName: 'الصف العاشر' };
+  const str = gradeStr.trim();
+  if (str.includes('خامس') || str === '5' || str === 'grade-5') return { gradeId: 'grade-5', gradeName: 'الصف الخامس' };
+  if (str.includes('سادس') || str === '6' || str === 'grade-6') return { gradeId: 'grade-6', gradeName: 'الصف السادس' };
+  if (str.includes('سابع') || str === '7' || str === 'grade-7') return { gradeId: 'grade-7', gradeName: 'الصف السابع' };
+  if (str.includes('ثامن') || str === '8' || str === 'grade-8') return { gradeId: 'grade-8', gradeName: 'الصف الثامن' };
+  if (str.includes('تاسع') || str === '9' || str === 'grade-9') return { gradeId: 'grade-9', gradeName: 'الصف التاسع' };
+  if (str.includes('حادي عشر') || str === '11' || str === 'grade-11') return { gradeId: 'grade-11', gradeName: 'الصف الحادي عشر' };
+  if (str.includes('ثاني عشر') || str === '12' || str === 'grade-12') return { gradeId: 'grade-12', gradeName: 'الصف الثاني عشر' };
+  if (str.includes('عاشر') || str === '10' || str === 'grade-10') return { gradeId: 'grade-10', gradeName: 'الصف العاشر' };
+  return { gradeId: 'grade-' + str, gradeName: str };
+}
+
+/**
+ * Normalizes subject text to canonical subject ID and display name.
+ */
+export function normalizeSubject(subjectStr?: string | null): { subjectId: string; subjectName: string } {
+  if (!subjectStr) return { subjectId: 'general-science', subjectName: 'العلوم' };
+  const str = subjectStr.trim();
+  if (str.includes('كيمياء') || str === 'chemistry') return { subjectId: 'chemistry', subjectName: 'الكيمياء' };
+  if (str.includes('فيزياء') || str === 'physics') return { subjectId: 'physics', subjectName: 'الفيزياء' };
+  if (str.includes('أحياء') || str.includes('احياء') || str === 'biology') return { subjectId: 'biology', subjectName: 'الأحياء' };
+  if (str.includes('بيئ') || str === 'environmental-science') return { subjectId: 'environmental-science', subjectName: 'العلوم البيئية' };
+  if (str.includes('علوم') || str === 'general-science') return { subjectId: 'general-science', subjectName: 'العلوم' };
+  return { subjectId: str, subjectName: str };
+}
+
+/**
  * Transforms a frontend ResourceItem into columns for `public.resources`:
  */
 export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
@@ -78,13 +109,16 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
   const status = item.status === 'submitted' ? 'pending' : (item.status || 'pending');
   const userId = item.user_id || item.authorId || undefined;
 
+  const { gradeName } = normalizeGrade(item.gradeName || item.gradeId);
+  const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
+
   const row: Record<string, unknown> = {
     id,
     title: item.title || 'مورد تعليمي بدون عنوان',
     description: item.description || '',
     type: item.resourceType || item.type || 'محاكاة',
-    subject: item.subjectName || 'العلوم',
-    grade: item.gradeName || 'الصف الخامس',
+    subject: subjectName,
+    grade: gradeName,
     url,
     created_at: item.createdAt || new Date().toISOString()
   };
@@ -191,6 +225,11 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     !!extractedHtml ||
     (fileUrl && (fileUrl.includes('.html') || fileUrl.includes('/storage/')));
 
+  const { gradeId, gradeName } = normalizeGrade(grade);
+  const { subjectId, subjectName } = normalizeSubject(subject);
+  const cleanUnit = (existingLocal?.unit && existingLocal.unit !== 'الوحدة التعليمية') ? existingLocal.unit : '';
+  const cleanTopic = (existingLocal?.topic && existingLocal.topic !== title) ? existingLocal.topic : title;
+
   return {
     id,
     title,
@@ -206,24 +245,24 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     fileType: isInteractiveType ? '.html' : undefined,
     resourceType: type,
     type,
-    subjectName: subject,
-    gradeName: grade,
-    gradeId: 'grade-' + grade,
-    subjectId: 'subject-' + subject,
+    subjectName,
+    gradeName,
+    gradeId,
+    subjectId,
     curriculum: existingLocal?.curriculum || 'منهج سلطنة عُمان المعتمد',
-    unit: existingLocal?.unit || 'الوحدة التعليمية',
-    topic: title,
+    unit: cleanUnit,
+    topic: cleanTopic || title,
     user_id: userId,
     authorId,
     authorName,
     author: authorName,
     status,
     version: existingLocal?.version || '1.0',
-    tags: Array.isArray(existingLocal?.tags) && existingLocal.tags.length > 0 ? existingLocal.tags : [subject, grade, type],
+    tags: Array.isArray(existingLocal?.tags) && existingLocal.tags.length > 0 ? existingLocal.tags : [subjectName, gradeName, type],
     supportingFiles: existingLocal?.supportingFiles || [],
     units: existingLocal?.units || [],
-    ratingAverage: existingLocal?.ratingAverage ?? 5,
-    ratingCount: existingLocal?.ratingCount ?? 1,
+    ratingAverage: existingLocal?.ratingAverage ?? 0,
+    ratingCount: existingLocal?.ratingCount ?? 0,
     usageCount: existingLocal?.usageCount ?? 0,
     downloadCount: existingLocal?.downloadCount ?? 0,
     previewType: isInteractiveType ? 'html' : 'document',

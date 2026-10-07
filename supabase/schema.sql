@@ -95,39 +95,73 @@ ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
 DROP POLICY IF EXISTS "Authenticated users can insert notifications" ON public.notifications;
 DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Admins and owners can delete notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Users can view own notifications or admin view all" ON public.notifications;
+DROP POLICY IF EXISTS "Authenticated users can insert allowed notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Users can delete own notifications or admin delete all" ON public.notifications;
 
--- Policy 1: Users can view their own notifications or admin can view all
-CREATE POLICY "Users can view own notifications"
+-- Policy 1: SELECT (Only authenticated users; own notifications, global announcements, or admin access)
+CREATE POLICY "Users can view own notifications or admin view all"
   ON public.notifications
   FOR SELECT
+  TO authenticated
   USING (
-    user_id = coalesce(auth.uid()::text, '')
+    lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    OR user_id = auth.uid()::text
     OR lower(user_id) = lower(coalesce(auth.jwt() ->> 'email', ''))
     OR user_id = 'all'
-    OR lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
   );
 
--- Policy 2: Authenticated users can insert notifications
-CREATE POLICY "Authenticated users can insert notifications"
+-- Policy 2: INSERT (Strict least privilege: admin can send to anyone/broadcast; users can ONLY send to themselves)
+CREATE POLICY "Authenticated users can insert allowed notifications"
   ON public.notifications
   FOR INSERT
+  TO authenticated
   WITH CHECK (
-    auth.role() = 'authenticated'
+    lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    OR (
+      user_id = auth.uid()::text
+      OR lower(user_id) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    )
   );
 
--- Policy 3: Users can update (mark as read) their own notifications
+-- Policy 3: UPDATE (Users can only mark-read their own notifications; admin can update all)
 CREATE POLICY "Users can update own notifications"
   ON public.notifications
   FOR UPDATE
+  TO authenticated
   USING (
-    user_id = coalesce(auth.uid()::text, '')
+    lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    OR user_id = auth.uid()::text
     OR lower(user_id) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    OR user_id = 'all'
-    OR lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+  )
+  WITH CHECK (
+    lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    OR user_id = auth.uid()::text
+    OR lower(user_id) = lower(coalesce(auth.jwt() ->> 'email', ''))
   );
 
--- 10. Explicit Grants for PostgREST & Reload Cache
-GRANT ALL ON TABLE public.notifications TO anon, authenticated, service_role;
+-- Policy 4: DELETE (Users can only delete their own notifications; admin can delete all)
+CREATE POLICY "Users can delete own notifications or admin delete all"
+  ON public.notifications
+  FOR DELETE
+  TO authenticated
+  USING (
+    lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    OR user_id = auth.uid()::text
+    OR lower(user_id) = lower(coalesce(auth.jwt() ->> 'email', ''))
+  );
+
+-- 10. Minimal-Privilege Grants
+-- Completely REVOKE all access from anonymous users
+REVOKE ALL ON TABLE public.notifications FROM anon;
+
+-- Grant only required DML operations to authenticated users
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.notifications TO authenticated;
+
+-- Service role retains full administrative privileges
+GRANT ALL ON TABLE public.notifications TO service_role;
+
 NOTIFY pgrst, 'reload schema';
 
 

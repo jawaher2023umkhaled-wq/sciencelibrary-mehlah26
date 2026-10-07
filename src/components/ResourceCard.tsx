@@ -129,8 +129,10 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
 
           {/* Unit or Topic Context */}
           <p className="text-[11px] text-sky-700 font-semibold mb-2 truncate flex items-center gap-1 min-h-[1.25rem]">
-            {resource.unit || resource.topic ? (
-              <span>📖 {resource.unit || resource.topic}</span>
+            {resource.unit && resource.unit !== 'الوحدة التعليمية' && resource.unit !== 'عام' ? (
+              <span>📖 {resource.unit}</span>
+            ) : resource.topic && resource.topic !== resource.title ? (
+              <span>📖 {resource.topic}</span>
             ) : (
               <span className="text-transparent select-none">•</span>
             )}
@@ -155,7 +157,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
               {/* Rating */}
               <div className="flex items-center gap-1 text-amber-500 font-bold">
                 <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                <span>{resource.ratingAverage > 0 ? resource.ratingAverage : 'جديد'}</span>
+                <span>{(resource.ratingCount || 0) > 0 && (resource.ratingAverage || 0) > 0 ? (resource.ratingAverage || 0).toFixed(1) : 'لا توجد تقييمات بعد'}</span>
               </div>
 
               {/* Usage Count */}
