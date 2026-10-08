@@ -184,6 +184,9 @@ DROP POLICY IF EXISTS "Public can view educational-resources" ON storage.objects
 DROP POLICY IF EXISTS "Admin can upload educational-resources" ON storage.objects;
 DROP POLICY IF EXISTS "Admin can update educational-resources" ON storage.objects;
 DROP POLICY IF EXISTS "Admin can delete educational-resources" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users and admin can upload educational-resources" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users and admin can update educational-resources" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users and admin can delete educational-resources" ON storage.objects;
 
 -- Policy 1: SELECT (Public Read for students, teachers, and iframe viewers)
 CREATE POLICY "Public can view educational-resources"
@@ -191,38 +194,50 @@ CREATE POLICY "Public can view educational-resources"
   FOR SELECT
   USING (bucket_id = 'educational-resources');
 
--- Policy 2: INSERT (Admin upload only)
-CREATE POLICY "Admin can upload educational-resources"
+-- Policy 2: INSERT (Normal authenticated users in own folder {userId}/*; Admin anywhere)
+CREATE POLICY "Authenticated users and admin can upload educational-resources"
   ON storage.objects
   FOR INSERT
   TO authenticated
   WITH CHECK (
     bucket_id = 'educational-resources'
-    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    AND (
+      lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+      OR (storage.foldername(name))[1] = auth.uid()::text
+    )
   );
 
--- Policy 3: UPDATE (Admin update only)
-CREATE POLICY "Admin can update educational-resources"
+-- Policy 3: UPDATE (Normal authenticated users in own folder {userId}/*; Admin anywhere)
+CREATE POLICY "Authenticated users and admin can update educational-resources"
   ON storage.objects
   FOR UPDATE
   TO authenticated
   USING (
     bucket_id = 'educational-resources'
-    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    AND (
+      lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+      OR (storage.foldername(name))[1] = auth.uid()::text
+    )
   )
   WITH CHECK (
     bucket_id = 'educational-resources'
-    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    AND (
+      lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+      OR (storage.foldername(name))[1] = auth.uid()::text
+    )
   );
 
--- Policy 4: DELETE (Admin delete only)
-CREATE POLICY "Admin can delete educational-resources"
+-- Policy 4: DELETE (Normal authenticated users in own folder {userId}/*; Admin anywhere)
+CREATE POLICY "Authenticated users and admin can delete educational-resources"
   ON storage.objects
   FOR DELETE
   TO authenticated
   USING (
     bucket_id = 'educational-resources'
-    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+    AND (
+      lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+      OR (storage.foldername(name))[1] = auth.uid()::text
+    )
   );
 
 NOTIFY pgrst, 'reload schema';

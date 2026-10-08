@@ -13,7 +13,7 @@ import {
   AuditLogItem
 } from '../types';
 import { storageService } from '../services/storageService';
-import { supabaseResourceService, generateUuid } from '../services/supabaseResourceService';
+import { supabaseResourceService, generateUuid, isValidUuid } from '../services/supabaseResourceService';
 import { supabaseNotificationService } from '../services/supabaseNotificationService';
 import { useAuth } from './AuthContext';
 
@@ -53,7 +53,7 @@ interface ResourceContextType {
   closeSandbox: () => void;
   toggleFavorite: (resourceId: string) => void;
   rateResource: (resourceId: string, score: number) => void;
-  createResource: (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>) => Promise<ResourceItem | null>;
+  createResource: (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'> & { id?: string }) => Promise<ResourceItem | null>;
   updateResource: (id: string, updates: Partial<ResourceItem>) => void;
   startReview: (id: string) => void;
   reviewResource: (id: string, status: ResourceStatus, comment: string) => void;
@@ -333,8 +333,8 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     showToast('شكراً لك، تم تسجيل تقييمك بنجاح', 'success');
   };
 
-  const createResource = async (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'>): Promise<ResourceItem | null> => {
-    const newId = generateUuid();
+  const createResource = async (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'> & { id?: string }): Promise<ResourceItem | null> => {
+    const newId = resourceData.id && isValidUuid(resourceData.id) ? resourceData.id : generateUuid();
     const now = new Date().toISOString();
     const isPendingReview = resourceData.status === 'pending' || resourceData.status === 'submitted';
     const effectiveStatus: ResourceStatus = isPendingReview ? 'pending' : (resourceData.status || 'pending');

@@ -43,7 +43,7 @@ export function isStorageUrl(url?: string | null): boolean {
 
 /**
  * Uploads an educational resource file, simulation HTML, or asset to Supabase Storage.
- * Generates an idempotent, clean path under resources/{resourceId}/{fileName}.
+ * Generates an approved path under {userId}/{resourceId}/{cleanFileName}.
  * 
  * If the bucket is not yet provisioned, returns { success: false, error: '...' }
  * without throwing an uncaught exception, allowing the caller to safely fall back.
@@ -52,11 +52,23 @@ export async function uploadResourceFile(
   file: File | Blob | string,
   fileName: string,
   resourceId: string,
+  userId?: string,
   contentType?: string
 ): Promise<StorageUploadResult> {
   try {
     const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const storagePath = `${resourceId}/${Date.now()}_${cleanFileName}`;
+    
+    // Resolve effective userId from parameter, active Supabase session, or safe fallback
+    let effectiveUserId = userId?.trim();
+    if (!effectiveUserId) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      effectiveUserId = sessionData?.session?.user?.id;
+    }
+    if (!effectiveUserId) {
+      effectiveUserId = 'public';
+    }
+
+    const storagePath = `${effectiveUserId}/${resourceId}/${cleanFileName}`;
 
     let body: Blob | File;
     let resolvedContentType = contentType;

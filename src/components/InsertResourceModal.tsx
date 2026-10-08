@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { useResources } from '../context/ResourceContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
 import { ResourceItem, SupportingFile, PreviewType, ResourceStatus } from '../types';
+import { uploadResourceFile } from '../services/supabaseStorageService';
+import { generateUuid } from '../services/supabaseResourceService';
 import { ErrorBoundary } from './ErrorBoundary';
 import {
   X,
@@ -146,6 +148,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   const [fileSize, setFileSize] = useState('');
   const [fileType, setFileType] = useState('');
   const [htmlContent, setHtmlContent] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [supportingFiles, setSupportingFiles] = useState<SupportingFile[]>([]);
   const [newSuppFileName, setNewSuppFileName] = useState('');
   const [newSuppFileUrl, setNewSuppFileUrl] = useState('');
@@ -240,6 +243,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       setScientificConcepts([]);
       setThumbnailUrl('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
       setHtmlContent('');
+      setSelectedFile(null);
       setFileName('');
       setFileSize('');
       setFileType('');
@@ -371,6 +375,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     setFileName(file.name);
     setFileSize((file.size / (1024 * 1024)).toFixed(2) + ' MB');
     setFileType(ext);
+    setSelectedFile(file);
     setIsUploading(true);
     setUploadProgress(15);
 
@@ -813,24 +818,91 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         ? 'pending'
         : (resourceToEdit.status === 'needs_revision' ? 'needs_revision' : finalStatus);
 
-      updateResource(resourceToEdit.id, {
-        ...resourceDataRecord,
-        thumbnailUrl: effectiveThumb,
-        thumbnail_url: effectiveThumb,
-        image_url: effectiveThumb,
-        status: resolvedStatus,
-        user_id: currentUserId,
-        updatedAt: new Date().toISOString()
-      });
-      onClose();
+      setIsSubmitting(true);
+      try {
+        let finalUploadedUrl = resourceDataRecord.fileUrl;
+        let finalStoragePath: string | undefined = undefined;
+
+        // If user selected a new file during edit, upload to Supabase Storage
+        if (selectedFile) {
+          const uploadRes = await uploadResourceFile(
+            selectedFile,
+            selectedFile.name,
+            resourceToEdit.id,
+            currentUserId,
+            selectedFile.type
+          );
+          if (uploadRes.success && uploadRes.publicUrl) {
+            finalUploadedUrl = uploadRes.publicUrl;
+            finalStoragePath = uploadRes.storagePath;
+          }
+        }
+
+        updateResource(resourceToEdit.id, {
+          ...resourceDataRecord,
+          fileUrl: finalUploadedUrl,
+          file_url: finalUploadedUrl,
+          file_path: finalStoragePath,
+          thumbnailUrl: effectiveThumb,
+          thumbnail_url: effectiveThumb,
+          image_url: effectiveThumb,
+          status: resolvedStatus,
+          user_id: currentUserId,
+          updatedAt: new Date().toISOString()
+        });
+        onClose();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setValidationError(`حدث خطأ أثناء حفظ التعديلات: ${msg}`);
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
       setIsSubmitting(true);
       try {
         const isReviewSubmit = finalStatus === 'submitted' || finalStatus === 'pending';
         const resolvedStatus: ResourceStatus = isReviewSubmit ? 'pending' : finalStatus;
 
+        const newResourceId = generateUuid();
+        let finalUploadedUrl = resourceDataRecord.fileUrl;
+        let finalStoragePath: string | undefined = undefined;
+
+        // If file is selected (binary, document, or archive), upload to Supabase Storage
+        if (selectedFile) {
+          const uploadRes = await uploadResourceFile(
+            selectedFile,
+            selectedFile.name,
+            newResourceId,
+            currentUserId,
+            selectedFile.type
+          );
+          if (uploadRes.success && uploadRes.publicUrl) {
+            finalUploadedUrl = uploadRes.publicUrl;
+            finalStoragePath = uploadRes.storagePath;
+          } else if (uploadRes.error) {
+            console.warn('Supabase Storage upload warning (falling back gracefully):', uploadRes.error);
+          }
+        } else if (finalHtml && !resourceDataRecord.fileUrl?.startsWith('http')) {
+          // If HTML content simulation created without binary file, upload as HTML simulation file
+          const uploadRes = await uploadResourceFile(
+            finalHtml,
+            `${safeTitle}.html`,
+            newResourceId,
+            currentUserId,
+            'text/html;charset=utf-8'
+          );
+          if (uploadRes.success && uploadRes.publicUrl) {
+            finalUploadedUrl = uploadRes.publicUrl;
+            finalStoragePath = uploadRes.storagePath;
+          }
+        }
+
         const saved = await createResource({
           ...resourceDataRecord,
+          id: newResourceId,
+          fileUrl: finalUploadedUrl,
+          file_url: finalUploadedUrl,
+          file_path: finalStoragePath,
           thumbnailUrl: effectiveThumb,
           thumbnail_url: effectiveThumb,
           image_url: effectiveThumb,
