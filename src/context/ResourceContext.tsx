@@ -439,53 +439,60 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } : {})
     };
 
-    // 1. Immediately update local storage
-    const updated = storageService.updateResource(id, normalizedUpdates);
+    // 1. Keep reference to previous state for reliable rollback
+    if (!previousResource) return;
 
-    // 2. Immediately update local React state so UI reflects new thumbnail and data without page refresh
-    if (updated) {
-      setResources(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
-      if (activeResource && activeResource.id === id) {
-        setActiveResource({ ...activeResource, ...updated });
-      }
-    } else {
-      setResources(prev => prev.map(r => r.id === id ? { ...r, ...normalizedUpdates } : r));
-      if (activeResource && activeResource.id === id) {
-        setActiveResource({ ...activeResource, ...normalizedUpdates });
-      }
+    // 2. Optimistically update local React state for responsive feedback
+    const optimisticResource: ResourceItem = {
+      ...previousResource,
+      ...normalizedUpdates,
+      ...(effectiveThumb ? {
+        thumbnailUrl: effectiveThumb,
+        thumbnail_url: effectiveThumb,
+        image_url: effectiveThumb
+      } : {})
+    };
+
+    setResources(prev => prev.map(r => r.id === id ? optimisticResource : r));
+    if (activeResource && activeResource.id === id) {
+      setActiveResource(optimisticResource);
     }
-    refreshNotifications();
 
-    // 3. Direct persistence to Supabase resources table and sync
+    // 3. Direct persistence to Supabase resources table first; local storage is NOT updated until confirmed
     supabaseResourceService.updateResource(id, normalizedUpdates).then(({ data: savedRecord, savedToSupabase, error }) => {
-      if (savedToSupabase) {
+      if (savedToSupabase && savedRecord) {
         setIsSupabaseLive(true);
-        if (savedRecord) {
-          // Keep updated thumbnail in React state even if database doesn't echo it
-          const finalRecord = {
-            ...savedRecord,
-            ...(effectiveThumb ? {
-              thumbnailUrl: effectiveThumb,
-              thumbnail_url: effectiveThumb,
-              image_url: effectiveThumb
-            } : {})
-          };
-          setResources(prev => prev.map(r => r.id === id ? { ...r, ...finalRecord } : r));
-          if (activeResource && activeResource.id === id) {
-            setActiveResource(prev => prev ? { ...prev, ...finalRecord } : null);
-          }
+        // Keep updated thumbnail in React state even if database doesn't echo it
+        const finalRecord: ResourceItem = {
+          ...savedRecord,
+          ...(effectiveThumb ? {
+            thumbnailUrl: effectiveThumb,
+            thumbnail_url: effectiveThumb,
+            image_url: effectiveThumb
+          } : {})
+        };
+
+        // Only persist to local storage cache after confirmed database save
+        storageService.updateResource(id, finalRecord);
+
+        setResources(prev => prev.map(r => r.id === id ? { ...r, ...finalRecord } : r));
+        if (activeResource && activeResource.id === id) {
+          setActiveResource(prev => prev && prev.id === id ? { ...prev, ...finalRecord } : null);
         }
+        refreshNotifications();
         showToast('تم تحديث المورد ومزامنته مع Supabase بنجاح', 'success');
       } else {
         console.error('Supabase update persistence failure:', error);
-        // Revert on failure
-        if (previousResource) {
-          setResources(prev => prev.map(r => r.id === id ? previousResource : r));
-          if (activeResource && activeResource.id === id) {
-            setActiveResource(previousResource);
-          }
+        // Rollback optimistic React state on failure
+        setResources(prev => prev.map(r => r.id === id ? previousResource : r));
+        if (activeResource && activeResource.id === id) {
+          setActiveResource(previousResource);
         }
-        showToast(`فشل تحديث المورد في Supabase: ${error || 'تحقق من الصلاحيات'}`, 'error');
+        // Ensure local storage cache remains uncorrupted previous state
+        storageService.updateResource(id, previousResource);
+        refreshNotifications();
+        const actionableError = error || 'لم يتم تحديث أي سجل في قاعدة البيانات. قد تكون صلاحيات الحساب غير كافية أو أن المورد غير موجود.';
+        showToast(`فشل تحديث المورد في Supabase: ${actionableError}`, 'error');
       }
     });
   };

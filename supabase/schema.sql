@@ -162,6 +162,70 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.notifications TO authentica
 -- Service role retains full administrative privileges
 GRANT ALL ON TABLE public.notifications TO service_role;
 
+-- ==============================================================================
+-- 11. Supabase Storage: educational-resources Bucket & Storage RLS Policies
+-- ==============================================================================
+
+-- Create educational-resources bucket if not exists
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'educational-resources',
+  'educational-resources',
+  true,
+  52428800, -- 50 MB
+  NULL
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = true,
+  file_size_limit = 52428800;
+
+-- Clean prior storage policies if re-running
+DROP POLICY IF EXISTS "Public can view educational-resources" ON storage.objects;
+DROP POLICY IF EXISTS "Admin can upload educational-resources" ON storage.objects;
+DROP POLICY IF EXISTS "Admin can update educational-resources" ON storage.objects;
+DROP POLICY IF EXISTS "Admin can delete educational-resources" ON storage.objects;
+
+-- Policy 1: SELECT (Public Read for students, teachers, and iframe viewers)
+CREATE POLICY "Public can view educational-resources"
+  ON storage.objects
+  FOR SELECT
+  USING (bucket_id = 'educational-resources');
+
+-- Policy 2: INSERT (Admin upload only)
+CREATE POLICY "Admin can upload educational-resources"
+  ON storage.objects
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    bucket_id = 'educational-resources'
+    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+  );
+
+-- Policy 3: UPDATE (Admin update only)
+CREATE POLICY "Admin can update educational-resources"
+  ON storage.objects
+  FOR UPDATE
+  TO authenticated
+  USING (
+    bucket_id = 'educational-resources'
+    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+  )
+  WITH CHECK (
+    bucket_id = 'educational-resources'
+    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+  );
+
+-- Policy 4: DELETE (Admin delete only)
+CREATE POLICY "Admin can delete educational-resources"
+  ON storage.objects
+  FOR DELETE
+  TO authenticated
+  USING (
+    bucket_id = 'educational-resources'
+    AND lower(coalesce(auth.jwt() ->> 'email', '')) = 'sciencelibrary8@gmail.com'
+  );
+
 NOTIFY pgrst, 'reload schema';
+
 
 

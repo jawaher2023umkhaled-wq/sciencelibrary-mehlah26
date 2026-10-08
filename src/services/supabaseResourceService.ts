@@ -394,9 +394,6 @@ export const supabaseResourceService = {
    */
   async updateResource(id: string, updates: Partial<ResourceItem>): Promise<{ data: ResourceItem | null; savedToSupabase: boolean; error?: string }> {
     if (!isValidUuid(id)) {
-      if (id === 'res-chem-acid-base-10') {
-        return { data: null, savedToSupabase: true };
-      }
       return { data: null, savedToSupabase: false, error: `معرف المورد ليس بصيغة UUID صالحة: ${id}` };
     }
 
@@ -457,7 +454,11 @@ export const supabaseResourceService = {
         return { data: { ...mapped, ...updates, ...(effectiveThumb ? { thumbnailUrl: effectiveThumb, thumbnail_url: effectiveThumb, image_url: effectiveThumb } : {}) }, savedToSupabase: true };
       }
 
-      return { data: null, savedToSupabase: true };
+      return {
+        data: null,
+        savedToSupabase: false,
+        error: 'لم يتم تحديث أي سجل في قاعدة البيانات. قد تكون صلاحيات الحساب غير كافية أو أن المورد غير موجود.'
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Supabase UPDATE exception:', message);
