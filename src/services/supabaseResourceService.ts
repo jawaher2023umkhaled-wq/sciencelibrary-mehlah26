@@ -29,9 +29,9 @@ export function generateUuid(): string {
  * Helper to gracefully retry Supabase queries if optional columns are not yet in the database schema.
  */
 async function executeWithSchemaFallback(
-  action: (row: Record<string, unknown>) => PromiseLike<{ data: any; error: any }>,
+  action: (row: Record<string, unknown>) => PromiseLike<{ data: any; error: any; status?: number; statusText?: string }>,
   initialRow: Record<string, unknown>
-): Promise<{ data: any; error: any }> {
+): Promise<{ data: any; error: any; status?: number; statusText?: string }> {
   let row = { ...initialRow };
   for (let attempt = 0; attempt < 6; attempt++) {
     const res = await action(row);
@@ -393,47 +393,48 @@ export const supabaseResourceService = {
       return { data: null, savedToSupabase: false, error: `معرف المورد ليس بصيغة UUID صالحة: ${id}` };
     }
 
+    // Requirement 2: Strict write payload containing only confirmed columns in public.resources:
+    // id, title, description, subject, grade, type, url, download_url, created_at
     const partialRow: Record<string, unknown> = {};
     if (updates.title !== undefined) partialRow.title = updates.title;
     if (updates.description !== undefined) partialRow.description = updates.description;
-    if (updates.resourceType !== undefined) partialRow.type = updates.resourceType;
-    if (updates.subjectName !== undefined) partialRow.subject = updates.subjectName;
-    if (updates.gradeName !== undefined) partialRow.grade = updates.gradeName;
-
-    // Save updated thumbnail URL to thumbnail_url and image_url columns
-    const effectiveThumb = updates.thumbnailUrl || updates.thumbnail_url || updates.image_url;
-    if (effectiveThumb !== undefined) {
-      partialRow.thumbnail_url = effectiveThumb;
-      partialRow.image_url = effectiveThumb;
+    if (updates.resourceType !== undefined || updates.type !== undefined) {
+      partialRow.type = updates.resourceType || updates.type;
+    }
+    if (updates.subjectName !== undefined || updates.subjectId !== undefined) {
+      const { subjectName } = normalizeSubject(updates.subjectName || updates.subjectId);
+      partialRow.subject = subjectName;
+    }
+    if (updates.gradeName !== undefined || updates.gradeId !== undefined) {
+      const { gradeName } = normalizeGrade(updates.gradeName || updates.gradeId);
+      partialRow.grade = gradeName;
     }
 
-    // Save updated status and user_id
-    if (updates.status !== undefined) {
-      partialRow.status = updates.status === 'submitted' ? 'pending' : updates.status;
-    }
-    if (updates.user_id !== undefined) {
-      partialRow.user_id = updates.user_id;
-    }
+    const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
 
-    // Requirement 3: Save updated HTML content or file URL to the database record
+    // Save updated HTML content or file URL to the confirmed 'url' column
     if (updates.htmlContent !== undefined && updates.htmlContent.trim().length > 0) {
       partialRow.url = 'data:text/html;charset=utf-8,' + encodeURIComponent(updates.htmlContent);
-    } else if (updates.fileUrl !== undefined) {
-      partialRow.url = updates.fileUrl;
-    } else if (effectiveThumb !== undefined) {
-      // If no fileUrl or htmlContent, update url to the thumbnail image
+    } else if (updates.fileUrl !== undefined || (updates as any).url !== undefined) {
+      partialRow.url = updates.fileUrl || (updates as any).url;
+    } else if (effectiveThumb !== undefined && !updates.fileUrl) {
       partialRow.url = effectiveThumb;
     }
 
+    if ((updates as any).download_url !== undefined && typeof (updates as any).download_url === 'string') {
+      partialRow.download_url = (updates as any).download_url;
+    }
+
     try {
-      const { data, error } = await executeWithSchemaFallback(
+      const { data, error, status, statusText } = await executeWithSchemaFallback(
         (targetRow) => supabase.from('resources').update(targetRow).eq('id', id).select().maybeSingle(),
         partialRow
       );
 
       if (error) {
-        console.error('Supabase UPDATE rejected:', error);
-        return { data: null, savedToSupabase: false, error: error.message };
+        console.error('Supabase UPDATE rejected:', error, 'status:', status);
+        const detailedMsg = `[Status ${status || 'N/A'}${error.code ? ` - Code ${error.code}` : ''}] ${error.message}`;
+        return { data: null, savedToSupabase: false, error: detailedMsg };
       }
 
       if (data) {
@@ -453,7 +454,7 @@ export const supabaseResourceService = {
       return {
         data: null,
         savedToSupabase: false,
-        error: 'لم يتم تحديث أي سجل في قاعدة البيانات. قد تكون صلاحيات الحساب غير كافية أو أن المورد غير موجود.'
+        error: `[Status ${status || 200}] لم يتم تحديث أي سجل في قاعدة البيانات (matched 0 rows). قد تكون سياسة RLS تمنع التحديث للحساب الحالي أو أن المورد غير موجود.`
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
