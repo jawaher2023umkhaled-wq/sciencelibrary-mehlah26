@@ -101,17 +101,17 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
     }
   }
 
-  const downloadUrl = (item.fileUrl && !item.fileUrl.startsWith('https://images.unsplash.com'))
+  const downloadUrl = (item.download_url && item.download_url.startsWith('http'))
+    ? item.download_url
+    : (item.fileUrl && item.fileUrl.startsWith('http') && !item.fileUrl.startsWith('https://images.unsplash.com'))
     ? item.fileUrl
-    : (url.startsWith('http') ? url : undefined);
-
-  const thumb = item.thumbnailUrl || item.thumbnail_url || item.image_url || (url.startsWith('http') && !url.includes('.html') ? url : undefined);
-  const status = item.status === 'submitted' ? 'pending' : (item.status || 'pending');
-  const userId = item.user_id || item.authorId || undefined;
+    : (url.startsWith('http') && !url.startsWith('https://images.unsplash.com') ? url : undefined);
 
   const { gradeName } = normalizeGrade(item.gradeName || item.gradeId);
   const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
 
+  // Strictly write only confirmed production columns:
+  // id, title, description, subject, grade, type, url, download_url, created_at
   const row: Record<string, unknown> = {
     id,
     title: item.title || 'مورد تعليمي بدون عنوان',
@@ -123,13 +123,9 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
     created_at: item.createdAt || new Date().toISOString()
   };
 
-  if (downloadUrl) row.download_url = downloadUrl;
-  if (thumb) {
-    row.thumbnail_url = thumb;
-    row.image_url = thumb;
+  if (downloadUrl) {
+    row.download_url = downloadUrl;
   }
-  if (status) row.status = status;
-  if (userId) row.user_id = userId;
 
   return row;
 }

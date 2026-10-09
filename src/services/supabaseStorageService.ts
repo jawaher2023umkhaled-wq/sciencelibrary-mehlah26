@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { isValidUuid } from './supabaseResourceService';
 
 export const STORAGE_BUCKET = 'educational-resources';
 
@@ -8,6 +9,9 @@ export interface StorageUploadResult {
   storagePath?: string;
   error?: string;
 }
+
+export const MAX_STORAGE_FILE_SIZE = 52428800; // 50 MB
+export const OFFICIAL_ADMIN_EMAIL = 'sciencelibrary8@gmail.com';
 
 /**
  * Checks whether the educational-resources Storage bucket is provisioned and accessible.
@@ -45,8 +49,10 @@ export function isStorageUrl(url?: string | null): boolean {
  * Uploads an educational resource file, simulation HTML, or asset to Supabase Storage.
  * Generates an approved path under {userId}/{resourceId}/{cleanFileName}.
  * 
- * If the bucket is not yet provisioned, returns { success: false, error: '...' }
- * without throwing an uncaught exception, allowing the caller to safely fall back.
+ * Rules:
+ * - Anonymous users: upload rejected.
+ * - Authenticated users: upload only inside their own {userId} folder.
+ * - Admin (sciencelibrary8@gmail.com): full upload access across bucket.
  */
 export async function uploadResourceFile(
   file: File | Blob | string,
@@ -56,20 +62,62 @@ export async function uploadResourceFile(
   contentType?: string
 ): Promise<StorageUploadResult> {
   try {
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    
-    // Resolve effective userId from parameter, active Supabase session, or safe fallback
-    let effectiveUserId = userId?.trim();
-    if (!effectiveUserId) {
-      const { data: sessionData } = await supabase.auth.getSession();
-      effectiveUserId = sessionData?.session?.user?.id;
-    }
-    if (!effectiveUserId) {
-      effectiveUserId = 'public';
+    // 1. Verify active authentication session from Supabase
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    let sessionUser = sessionData?.session?.user;
+    if (!sessionUser && !sessionErr) {
+      const { data: userData } = await supabase.auth.getUser();
+      sessionUser = userData?.user || undefined;
     }
 
-    const storagePath = `${effectiveUserId}/${resourceId}/${cleanFileName}`;
+    if (!sessionUser) {
+      return {
+        success: false,
+        error: 'يجب تسجيل الدخول أولاً لرفع الملفات إلى التخزين السحابي (غير مصرح للمستخدمين المجهولين)'
+      };
+    }
+    const sessionUserId = sessionUser.id;
+    const sessionEmail = (sessionUser.email || '').trim().toLowerCase();
+    const isAdmin = sessionEmail === OFFICIAL_ADMIN_EMAIL;
 
+    // 2. Validate and resolve effective user ID
+    // Always default to authenticated session user ID to satisfy Supabase Storage RLS
+    let effectiveUserId = sessionUserId;
+    if (isAdmin && userId && isValidUuid(userId)) {
+      effectiveUserId = userId.trim();
+    }
+
+    if (!effectiveUserId || !isValidUuid(effectiveUserId) || effectiveUserId === 'public' || effectiveUserId === 'guest-author' || effectiveUserId.includes('/') || effectiveUserId.includes('..')) {
+      return {
+        success: false,
+        error: 'معرف المستخدم غير صالح أو مفقود. تعذر إكمال الرفع إلى التخزين السحابي'
+      };
+    }
+
+    // Validate resourceId
+    const cleanResourceId = (resourceId || '').trim();
+    if (!cleanResourceId || cleanResourceId.includes('/') || cleanResourceId.includes('..') || cleanResourceId.includes('\\')) {
+      return {
+        success: false,
+        error: 'معرف المورد غير صالح'
+      };
+    }
+
+    // 3. Sanitize filename and prevent path traversal
+    const baseName = fileName.replace(/\\/g, '/').split('/').pop() || 'resource';
+    if (baseName.includes('..') || baseName.includes('/') || baseName.includes('\\')) {
+      return {
+        success: false,
+        error: 'اسم الملف غير صالح ويحتوي على مسار غير آمن'
+      };
+    }
+
+    const cleanFileName = baseName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '') || 'resource_file';
+
+    // 4. Construct approved storage path: {userId}/{resourceId}/{cleanFileName}
+    const storagePath = `${effectiveUserId}/${cleanResourceId}/${cleanFileName}`;
+
+    // 5. Prepare body and check file size limit (50 MB)
     let body: Blob | File;
     let resolvedContentType = contentType;
 
@@ -83,6 +131,14 @@ export async function uploadResourceFile(
       }
     }
 
+    if (body.size > MAX_STORAGE_FILE_SIZE) {
+      return {
+        success: false,
+        error: 'حجم الملف يتجاوز الحد الأقصى المسموح به (50 ميجابايت)'
+      };
+    }
+
+    // 6. Perform upload to Supabase Storage bucket
     const { data, error } = await supabase.storage
       .from(STORAGE_BUCKET)
       .upload(storagePath, body, {

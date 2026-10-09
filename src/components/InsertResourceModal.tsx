@@ -4,8 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { useResources } from '../context/ResourceContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
 import { ResourceItem, SupportingFile, PreviewType, ResourceStatus } from '../types';
-import { uploadResourceFile } from '../services/supabaseStorageService';
-import { generateUuid } from '../services/supabaseResourceService';
+import { uploadResourceFile, deleteResourceFile } from '../services/supabaseStorageService';
+import { generateUuid, isValidUuid } from '../services/supabaseResourceService';
 import { ErrorBoundary } from './ErrorBoundary';
 import {
   X,
@@ -143,6 +143,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   const [scientificConcepts, setScientificConcepts] = useState<string[]>([]);
 
   // STEP 2: ملفات المورد
+  const [resourceId, setResourceId] = useState<string>(() => generateUuid());
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string | undefined>(undefined);
+  const [uploadedStoragePath, setUploadedStoragePath] = useState<string | undefined>(undefined);
   const [thumbnailUrl, setThumbnailUrl] = useState('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState('');
@@ -195,72 +198,99 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   const [usageContext, setUsageContext] = useState('استخدام مخبري وتطبيقي');
   const [executionTime, setExecutionTime] = useState('45 دقيقة (حصة دراسية)');
 
-  // Load existing data if editing
+  // Guard refs to prevent unwanted resets during active wizard steps
+  const prevIsOpenRef = React.useRef(false);
+  const prevResourceIdRef = React.useRef<string | undefined>(undefined);
+
+  // Load existing data if editing or initialize once on open
   useEffect(() => {
-    if (resourceToEdit) {
-      setTitle(resourceToEdit.title || '');
-      setAuthor(resourceToEdit.authorName || user?.displayName || '');
-      setDescription(resourceToEdit.description || '');
-      setGradeId(normalizeGradeId(resourceToEdit.gradeId, resourceToEdit.gradeName));
-      setSubjectId(normalizeSubjectId(resourceToEdit.subjectId, resourceToEdit.subjectName));
-      setCurriculum(resourceToEdit.curriculum || 'سلطنة عمان - كامبريدج');
-      setUnit(resourceToEdit.unit || '');
-      setTopic(resourceToEdit.topic || '');
-      setResourceType(resourceToEdit.resourceType || resourceToEdit.type || 'محاكاة');
-      setCategory(resourceToEdit.category || 'تجربة واستقصاء علمي');
-      setTags(Array.isArray(resourceToEdit.tags) ? resourceToEdit.tags.filter(t => typeof t === 'string' && t.trim().length > 0) : ['علوم', 'تفاعلي']);
-      setEducationalObjectives(Array.isArray(resourceToEdit.educationalObjectives) ? resourceToEdit.educationalObjectives.filter(Boolean) : []);
-      setScientificConcepts(Array.isArray(resourceToEdit.scientificConcepts) ? resourceToEdit.scientificConcepts.filter(Boolean) : []);
-      setThumbnailUrl(resourceToEdit.thumbnailUrl || (resourceToEdit as any).thumbnail_url || (resourceToEdit as any).image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
-      setHtmlContent(resourceToEdit.htmlContent || resourceToEdit.html_content || '');
-      setFileName(resourceToEdit.fileName || '');
-      setFileSize(resourceToEdit.fileSize || '');
-      setFileType(resourceToEdit.fileType || '');
-      setSupportingFiles(Array.isArray(resourceToEdit.supportingFiles) ? resourceToEdit.supportingFiles.filter(Boolean) : []);
-      setVersion(resourceToEdit.version || 'الإصدار 1.0');
-      setUsageRights(resourceToEdit.usageRights || 'جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)');
-      setAllowDownload(resourceToEdit.allowDownload ?? true);
-      setAllowPreview(resourceToEdit.allowPreview ?? true);
-      setUsageContext(resourceToEdit.usageContext || 'استخدام مخبري وتطبيقي');
-      setExecutionTime(resourceToEdit.executionTime || '45 دقيقة (حصة دراسية)');
-      setTargetStatus(resourceToEdit.status === 'draft' ? 'draft' : 'pending');
-      setCurrentStep(1);
-      setValidationError('');
-    } else {
-      // Reset form to defaults
-      setTitle('');
-      setAuthor(user?.displayName || '');
-      setDescription('');
-      setGradeId('grade-10');
-      setSubjectId('chemistry');
-      setCurriculum('سلطنة عمان - كامبريدج');
-      setUnit('');
-      setTopic('');
-      setResourceType('محاكاة');
-      setCategory('تجربة واستقصاء علمي');
-      setTags(['علوم', 'تفاعلي']);
-      setEducationalObjectives([]);
-      setScientificConcepts([]);
-      setThumbnailUrl('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
-      setHtmlContent('');
-      setSelectedFile(null);
-      setFileName('');
-      setFileSize('');
-      setFileType('');
-      setSupportingFiles([]);
-      setIsZipValidated(false);
-      setZipValidationDetails(null);
-      setValidationError('');
-      setVersion('الإصدار 1.0');
-      setUsageRights('جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)');
-      setAllowDownload(true);
-      setAllowPreview(true);
-      setUsageContext('استخدام مخبري وتطبيقي');
-      setExecutionTime('45 دقيقة (حصة دراسية)');
-      setTargetStatus('pending');
-      setCurrentStep(1);
+    const isJustOpening = isOpen && !prevIsOpenRef.current;
+    const hasResourceChanged = resourceToEdit?.id !== prevResourceIdRef.current;
+
+    prevIsOpenRef.current = isOpen;
+    prevResourceIdRef.current = resourceToEdit?.id;
+
+    if (!isOpen) return;
+
+    // Only reset/populate when the modal transitions from closed to open,
+    // or when the targeted resourceToEdit identity explicitly changes.
+    if (isJustOpening || hasResourceChanged) {
+      if (resourceToEdit) {
+        setResourceId(resourceToEdit.id);
+        setUploadedFileUrl(resourceToEdit.fileUrl || resourceToEdit.url);
+        setUploadedStoragePath(resourceToEdit.file_path);
+        setTitle(resourceToEdit.title || '');
+        setAuthor(resourceToEdit.authorName || user?.displayName || '');
+        setDescription(resourceToEdit.description || '');
+        setGradeId(normalizeGradeId(resourceToEdit.gradeId, resourceToEdit.gradeName));
+        setSubjectId(normalizeSubjectId(resourceToEdit.subjectId, resourceToEdit.subjectName));
+        setCurriculum(resourceToEdit.curriculum || 'سلطنة عمان - كامبريدج');
+        setUnit(resourceToEdit.unit || '');
+        setTopic(resourceToEdit.topic || '');
+        setResourceType(resourceToEdit.resourceType || resourceToEdit.type || 'محاكاة');
+        setCategory(resourceToEdit.category || 'تجربة واستقصاء علمي');
+        setTags(Array.isArray(resourceToEdit.tags) ? resourceToEdit.tags.filter(t => typeof t === 'string' && t.trim().length > 0) : ['علوم', 'تفاعلي']);
+        setEducationalObjectives(Array.isArray(resourceToEdit.educationalObjectives) ? resourceToEdit.educationalObjectives.filter(Boolean) : []);
+        setScientificConcepts(Array.isArray(resourceToEdit.scientificConcepts) ? resourceToEdit.scientificConcepts.filter(Boolean) : []);
+        setThumbnailUrl(resourceToEdit.thumbnailUrl || (resourceToEdit as any).thumbnail_url || (resourceToEdit as any).image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
+        setHtmlContent(resourceToEdit.htmlContent || resourceToEdit.html_content || '');
+        setFileName(resourceToEdit.fileName || '');
+        setFileSize(resourceToEdit.fileSize || '');
+        setFileType(resourceToEdit.fileType || '');
+        setSelectedFile(null);
+        setSupportingFiles(Array.isArray(resourceToEdit.supportingFiles) ? resourceToEdit.supportingFiles.filter(Boolean) : []);
+        setVersion(resourceToEdit.version || 'الإصدار 1.0');
+        setUsageRights(resourceToEdit.usageRights || 'جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)');
+        setAllowDownload(resourceToEdit.allowDownload ?? true);
+        setAllowPreview(resourceToEdit.allowPreview ?? true);
+        setUsageContext(resourceToEdit.usageContext || 'استخدام مخبري وتطبيقي');
+        setExecutionTime(resourceToEdit.executionTime || '45 دقيقة (حصة دراسية)');
+        setTargetStatus(resourceToEdit.status === 'draft' ? 'draft' : 'pending');
+        if (isJustOpening) {
+          setCurrentStep(1);
+        }
+        setValidationError('');
+      } else {
+        // Reset form to defaults only on initial open
+        setResourceId(generateUuid());
+        setUploadedFileUrl(undefined);
+        setUploadedStoragePath(undefined);
+        setTitle('');
+        setAuthor(user?.displayName || '');
+        setDescription('');
+        setGradeId('grade-10');
+        setSubjectId('chemistry');
+        setCurriculum('سلطنة عمان - كامبريدج');
+        setUnit('');
+        setTopic('');
+        setResourceType('محاكاة');
+        setCategory('تجربة واستقصاء علمي');
+        setTags(['علوم', 'تفاعلي']);
+        setEducationalObjectives([]);
+        setScientificConcepts([]);
+        setThumbnailUrl('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
+        setHtmlContent('');
+        setSelectedFile(null);
+        setFileName('');
+        setFileSize('');
+        setFileType('');
+        setSupportingFiles([]);
+        setIsZipValidated(false);
+        setZipValidationDetails(null);
+        setValidationError('');
+        setVersion('الإصدار 1.0');
+        setUsageRights('جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)');
+        setAllowDownload(true);
+        setAllowPreview(true);
+        setUsageContext('استخدام مخبري وتطبيقي');
+        setExecutionTime('45 دقيقة (حصة دراسية)');
+        setTargetStatus('pending');
+        if (isJustOpening) {
+          setCurrentStep(1);
+        }
+      }
     }
-  }, [resourceToEdit, isOpen, user]);
+  }, [isOpen, resourceToEdit?.id]);
 
   if (!isOpen) return null;
 
@@ -519,12 +549,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
           hasImages: imageEntries.length > 0
         });
 
-        setUploadProgress(100);
-        setIsUploading(false);
-        showToast('تم التحقق من حزمة ZIP بنجاح وجاهزة للمعاينة التفاعلية', 'success');
-
       } else if (ext === '.html' || ext === '.htm') {
-        setUploadProgress(70);
+        setUploadProgress(40);
         let text = await file.text();
         if (!text.includes('dir="rtl"') && !text.includes("dir='rtl'")) {
           text = text.replace('<html', '<html dir="rtl" lang="ar"');
@@ -534,24 +560,50 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setFileType('.html');
         setResourceType('محاكاة تفاعلية');
         setIsZipValidated(true);
-        setUploadProgress(100);
-        setIsUploading(false);
-        showToast('تم تحميل صفحة المحاكاة HTML بنجاح وجاهزة للعرض التفاعلي', 'success');
 
       } else {
         // Other files like PDF, PPTX, DOCX, MP4, etc.
-        setUploadProgress(100);
-        setIsUploading(false);
         if (ext === '.pdf') setResourceType('ملف PDF');
         else if (ext === '.pptx' || ext === '.ppt') setResourceType('عرض تقديمي');
         else if (ext === '.docx' || ext === '.doc') setResourceType('ملف Word');
         else if (ext === '.mp4') setResourceType('فيديو تعليمي');
         else if (ext === '.png' || ext === '.jpg' || ext === '.jpeg') setResourceType('صورة تعليمية');
-        showToast(`تم رفع الملف (${file.name}) بنجاح`, 'success');
       }
-    } catch (err) {
+
+      // Upload file directly to Supabase Storage bucket 'educational-resources'
+      setUploadProgress(70);
+      const activeResId = resourceToEdit?.id || resourceId;
+      const targetUserId = user?.id || (user as any)?.uid || undefined;
+
+      const uploadRes = await uploadResourceFile(
+        file,
+        file.name,
+        activeResId,
+        targetUserId,
+        file.type
+      );
+
+      if (uploadRes.success && uploadRes.publicUrl) {
+        setUploadedFileUrl(uploadRes.publicUrl);
+        setUploadedStoragePath(uploadRes.storagePath);
+        setUploadProgress(100);
+        setIsUploading(false);
+        setCurrentStep(2);
+        showToast(`تم رفع وتوثيق الملف (${file.name}) بنجاح في التخزين السحابي`, 'success');
+      } else {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setUploadedFileUrl(undefined);
+        setUploadedStoragePath(undefined);
+        setCurrentStep(2);
+        setValidationError(`فشل رفع الملف إلى التخزين السحابي: ${uploadRes.error || 'خطأ غير معروف في الرفع'}`);
+      }
+    } catch (err: unknown) {
       setIsUploading(false);
-      setValidationError('تعذر التحقق من الحزمة. يرجى مراجعة هيكل الملف والمحاولة مجدداً.');
+      setUploadProgress(0);
+      setCurrentStep(2);
+      const msg = err instanceof Error ? err.message : String(err);
+      setValidationError(`حدث خطأ أثناء معالجة ورفع الملف: ${msg}`);
       console.error(err);
     }
   };
@@ -820,28 +872,34 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
 
       setIsSubmitting(true);
       try {
-        let finalUploadedUrl = resourceDataRecord.fileUrl;
-        let finalStoragePath: string | undefined = undefined;
+        let finalUploadedUrl = uploadedFileUrl || resourceDataRecord.fileUrl;
+        let finalStoragePath: string | undefined = uploadedStoragePath || resourceToEdit.file_path;
 
-        // If user selected a new file during edit, upload to Supabase Storage
-        if (selectedFile) {
+        // If user selected a new file during edit and not yet uploaded, upload to Supabase Storage
+        if (selectedFile && !uploadedFileUrl) {
           const uploadRes = await uploadResourceFile(
             selectedFile,
             selectedFile.name,
             resourceToEdit.id,
-            currentUserId,
+            user?.id,
             selectedFile.type
           );
           if (uploadRes.success && uploadRes.publicUrl) {
             finalUploadedUrl = uploadRes.publicUrl;
             finalStoragePath = uploadRes.storagePath;
+          } else {
+            setValidationError(`فشل رفع الملف إلى التخزين السحابي: ${uploadRes.error || 'خطأ غير معروف في الرفع'}`);
+            setIsSubmitting(false);
+            return;
           }
         }
 
         updateResource(resourceToEdit.id, {
           ...resourceDataRecord,
+          url: finalUploadedUrl,
           fileUrl: finalUploadedUrl,
           file_url: finalUploadedUrl,
+          download_url: finalUploadedUrl,
           file_path: finalStoragePath,
           thumbnailUrl: effectiveThumb,
           thumbnail_url: effectiveThumb,
@@ -863,45 +921,54 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         const isReviewSubmit = finalStatus === 'submitted' || finalStatus === 'pending';
         const resolvedStatus: ResourceStatus = isReviewSubmit ? 'pending' : finalStatus;
 
-        const newResourceId = generateUuid();
-        let finalUploadedUrl = resourceDataRecord.fileUrl;
-        let finalStoragePath: string | undefined = undefined;
+        // Reuse consistent resourceId matching the Supabase Storage upload path
+        const targetResourceId = isValidUuid(resourceId) ? resourceId : generateUuid();
+        let finalUploadedUrl = uploadedFileUrl || resourceDataRecord.fileUrl;
+        let finalStoragePath: string | undefined = uploadedStoragePath;
 
-        // If file is selected (binary, document, or archive), upload to Supabase Storage
-        if (selectedFile) {
+        // If file is selected but was not yet uploaded in Step 2, upload now
+        if (selectedFile && !finalUploadedUrl) {
           const uploadRes = await uploadResourceFile(
             selectedFile,
             selectedFile.name,
-            newResourceId,
-            currentUserId,
+            targetResourceId,
+            user?.id,
             selectedFile.type
           );
           if (uploadRes.success && uploadRes.publicUrl) {
             finalUploadedUrl = uploadRes.publicUrl;
             finalStoragePath = uploadRes.storagePath;
-          } else if (uploadRes.error) {
-            console.warn('Supabase Storage upload warning (falling back gracefully):', uploadRes.error);
+          } else {
+            setValidationError(`فشل رفع الملف إلى التخزين السحابي: ${uploadRes.error || 'خطأ غير معروف في الرفع'}`);
+            setIsSubmitting(false);
+            return;
           }
-        } else if (finalHtml && !resourceDataRecord.fileUrl?.startsWith('http')) {
+        } else if (finalHtml && (!finalUploadedUrl || !finalUploadedUrl.startsWith('http'))) {
           // If HTML content simulation created without binary file, upload as HTML simulation file
           const uploadRes = await uploadResourceFile(
             finalHtml,
             `${safeTitle}.html`,
-            newResourceId,
-            currentUserId,
+            targetResourceId,
+            user?.id,
             'text/html;charset=utf-8'
           );
           if (uploadRes.success && uploadRes.publicUrl) {
             finalUploadedUrl = uploadRes.publicUrl;
             finalStoragePath = uploadRes.storagePath;
+          } else {
+            setValidationError(`فشل رفع ملف المحاكاة إلى التخزين السحابي: ${uploadRes.error || 'خطأ غير معروف في الرفع'}`);
+            setIsSubmitting(false);
+            return;
           }
         }
 
         const saved = await createResource({
           ...resourceDataRecord,
-          id: newResourceId,
+          id: targetResourceId,
+          url: finalUploadedUrl,
           fileUrl: finalUploadedUrl,
           file_url: finalUploadedUrl,
+          download_url: finalUploadedUrl,
           file_path: finalStoragePath,
           thumbnailUrl: effectiveThumb,
           thumbnail_url: effectiveThumb,
@@ -912,9 +979,16 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
           user_id: currentUserId,
           status: resolvedStatus
         });
+
         if (saved) {
           onClose();
         } else {
+          // Database failure after Storage upload attempts to delete the uploaded object (Rollback)
+          if (finalStoragePath) {
+            await deleteResourceFile(finalStoragePath).catch((cleanupErr) => {
+              console.warn('Rollback delete failed:', cleanupErr);
+            });
+          }
           setValidationError('تعذر حفظ المورد في قاعدة البيانات Supabase. يرجى مراجعة الصلاحيات أو التأكد من تسجيل الدخول كمدير معتمد.');
         }
       } catch (err: unknown) {

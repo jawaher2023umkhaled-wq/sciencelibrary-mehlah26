@@ -830,7 +830,26 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     storageService.incrementUsage(resource.id, 'download');
     refreshResources();
 
-    // Create a real downloadable file
+    const storageOrHttpUrl = (resource.download_url && resource.download_url.startsWith('http'))
+      ? resource.download_url
+      : (resource.fileUrl && resource.fileUrl.startsWith('http') && !resource.fileUrl.startsWith('https://images.unsplash.com'))
+      ? resource.fileUrl
+      : undefined;
+
+    if (storageOrHttpUrl) {
+      const a = document.createElement('a');
+      a.href = storageOrHttpUrl;
+      a.download = resource.fileName || `${(resource.title || 'resource').replace(/\s+/g, '_')}.html`;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('جارٍ تحميل ملف المورد من التخزين السحابي...', 'success');
+      return;
+    }
+
+    // Fallback: Create a real downloadable file from memory content
     const content = resource.htmlContent || `مكتبة العلوم الرقمية - مدرسة محلاح للبنات (5-12)\n\nعنوان المورد: ${resource.title}\nالصف: ${resource.gradeName}\nالمادة: ${resource.subjectName}\nنوع المورد: ${resource.resourceType}\nالوحدة: ${resource.unit}\nالموضوع: ${resource.topic}\nالوصف:\n${resource.description}\n\nتاريخ الإنشاء: ${resource.createdAt}\nالكاتب: ${resource.authorName}\nالإصدار: ${resource.version}`;
     const mime = resource.htmlContent ? 'text/html;charset=utf-8' : 'text/plain;charset=utf-8';
     const blob = new Blob([content], { type: mime });
