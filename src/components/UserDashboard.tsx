@@ -55,7 +55,9 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
   // Filter user's resources
   const userResources = resources.filter(
-    r => r.authorId === user?.id || r.authorName === user?.displayName || isAdminRole(user?.role)
+    r => (user?.id && (r.user_id === user.id || r.authorId === user.id)) ||
+         (user?.displayName && r.authorName === user.displayName) ||
+         isAdminRole(user?.role)
   );
 
   const publishedCount = userResources.filter(r => r.status === 'published').length;
@@ -75,8 +77,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   });
 
   const handleSubmitDraft = (res: ResourceItem) => {
-    updateResource(res.id, { status: 'pending', user_id: user?.id });
-    showToast('تم إرسال المورد للمراجعة بنجاح', 'success');
+    updateResource(res.id, { status: 'pending' });
   };
 
   if (!user) {

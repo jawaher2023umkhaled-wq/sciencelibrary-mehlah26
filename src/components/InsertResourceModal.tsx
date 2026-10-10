@@ -804,6 +804,11 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       return;
     }
 
+    if (!user?.id || !isValidUuid(user.id)) {
+      setValidationError('يجب تسجيل الدخول الفعلي بحساب مصادق في المنصة لإدراج أو تعديل المورد.');
+      return;
+    }
+
     const selectedGrade = (effectiveGrades || []).find(g => g && g.id === gradeId);
     const selectedSubject = (displaySubjects || []).find(s => s && s.id === subjectId);
     const matchedCurric = (safeCurricula || []).find(c => c && (c.name === curriculum || c.id === resourceToEdit?.curriculumId));
@@ -811,9 +816,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     const matchedTopic = (safeTopics || []).find(t => t && t.name === (topic || '').trim());
     const matchedType = (effectiveResourceTypes || []).find(t => t && t.name === resourceType);
 
-    const authorName = (author || '').trim() || resourceToEdit?.authorName || user?.displayName || 'عضو هيئة التدريس';
-    const authorId = resourceToEdit?.authorId || user?.id || 'guest-author';
-    const currentUserId = user?.id || (user as any)?.uid || authorId;
+    const authorName = (author || '').trim() || resourceToEdit?.authorName || user.displayName || 'عضو هيئة التدريس';
+    const authorId = (resourceToEdit?.authorId && isValidUuid(resourceToEdit.authorId)) ? resourceToEdit.authorId : user.id;
+    const currentUserId = user.id;
 
     const finalHtml = htmlContent || undefined;
     const finalFileUrl = finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined);

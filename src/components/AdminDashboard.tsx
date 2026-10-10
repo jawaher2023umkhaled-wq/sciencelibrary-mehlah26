@@ -1029,7 +1029,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <button
                                   onClick={() => {
                                     publishResource(res.id);
-                                    showToast('تم نشر المورد بنجاح في المكتبة الرقمية', 'success');
                                   }}
                                   title="نشر في المكتبة"
                                   className="p-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer border border-emerald-200"
@@ -1040,7 +1039,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <button
                                   onClick={() => {
                                     unpublishResource(res.id);
-                                    showToast('تم إلغاء النشر وإرجاع المورد إلى المعتمد', 'info');
                                   }}
                                   title="إلغاء النشر (إرجاع للمعتمد)"
                                   className="p-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors cursor-pointer border border-amber-200"

@@ -110,8 +110,8 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
   const { gradeName } = normalizeGrade(item.gradeName || item.gradeId);
   const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
 
-  // Strictly write only confirmed production columns:
-  // id, title, description, subject, grade, type, url, download_url, created_at
+  // Strictly write only confirmed production columns in public.resources:
+  // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at
   const row: Record<string, unknown> = {
     id,
     title: item.title || 'مورد تعليمي بدون عنوان',
@@ -125,6 +125,22 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
 
   if (downloadUrl) {
     row.download_url = downloadUrl;
+  }
+
+  if (item.status) {
+    row.status = item.status;
+  }
+
+  if (item.user_id && isValidUuid(item.user_id)) {
+    row.user_id = item.user_id;
+  }
+
+  if (item.publishedAt) {
+    row.published_at = item.publishedAt;
+  } else if (item.status === 'published') {
+    row.published_at = item.createdAt || new Date().toISOString();
+  } else if (item.status) {
+    row.published_at = null;
   }
 
   return row;
@@ -197,7 +213,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     fileUrl = `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}`;
   }
 
-  // Check local cache for fallback data if column is not yet in Supabase table
+  // Check local cache for fallback metadata if needed
   const existingLocal = typeof window !== 'undefined' ? storageService.getResourceById(id) : undefined;
 
   const rawThumbnailField = row.thumbnail_url || row.image_url || row.thumbnail;
@@ -207,9 +223,10 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
 
   const rowStatus = row.status ? String(row.status) : undefined;
   const status: ResourceStatus = (rowStatus as ResourceStatus) || existingLocal?.status || 'published';
-  const userId = row.user_id ? String(row.user_id) : (existingLocal?.user_id || undefined);
-  const authorId = row.author_id ? String(row.author_id) : (userId || existingLocal?.authorId || 'admin');
+  const userId = (row.user_id && isValidUuid(String(row.user_id))) ? String(row.user_id) : (existingLocal?.user_id && isValidUuid(existingLocal.user_id) ? existingLocal.user_id : undefined);
+  const authorId = userId || (existingLocal?.authorId && isValidUuid(existingLocal.authorId) ? existingLocal.authorId : '');
   const authorName = row.author_name ? String(row.author_name) : (existingLocal?.authorName || 'مكتبة العلوم الرقمية');
+  const publishedAt = row.published_at ? String(row.published_at) : (status === 'published' ? createdAt : undefined);
 
   const typeLower = type.toLowerCase();
   const isInteractiveType =
@@ -266,7 +283,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     allowPreview: existingLocal?.allowPreview ?? true,
     createdAt,
     updatedAt: existingLocal?.updatedAt || createdAt,
-    publishedAt: status === 'published' ? createdAt : undefined
+    publishedAt: publishedAt || (status === 'published' ? createdAt : undefined)
   };
 }
 
@@ -292,6 +309,7 @@ export const supabaseResourceService = {
 
   /**
    * Fetch all resources live from the Supabase `resources` table.
+   * RLS automatically filters: visitors see published, users see published + own, admin sees all.
    */
   async fetchLiveResources(): Promise<{ data: ResourceItem[]; isLive: boolean; error?: string }> {
     try {
@@ -349,35 +367,117 @@ export const supabaseResourceService = {
 
   /**
    * Create a new resource directly in Supabase `resources` table.
+   * Enforces:
+   * - Active Supabase Auth session required.
+   * - user_id strictly equals session auth.uid() (UUID).
+   * - Regular users: status = 'pending', published_at = null.
+   * - Admin (sciencelibrary8@gmail.com): can insert as published or pending.
    */
   async createResource(item: ResourceItem): Promise<{ data: ResourceItem | null; savedToSupabase: boolean; error?: string }> {
-    const row = toSupabaseRow(item);
-
     try {
-      const { data, error } = await executeWithSchemaFallback(
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr || !sessionData?.session?.user) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'يجب تسجيل الدخول أولاً بحساب معتمد في Supabase لإدراج المورد في قاعدة البيانات.'
+        };
+      }
+
+      const sessionUser = sessionData.session.user;
+      const sessionEmail = (sessionUser.email || '').trim().toLowerCase();
+      const isAdmin = sessionEmail === 'sciencelibrary8@gmail.com';
+      const authUserId = sessionUser.id;
+
+      if (!isValidUuid(authUserId)) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'معرف المستخدم في جلسة Supabase غير صالح (ليس UUID).'
+        };
+      }
+
+      const id = isValidUuid(item.id) ? item.id : generateUuid();
+      const { gradeName } = normalizeGrade(item.gradeName || item.gradeId);
+      const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
+
+      const rawHtml = item.htmlContent || item.html_content;
+      let url = item.fileUrl || item.file_url || '';
+      if (rawHtml && rawHtml.trim().length > 0) {
+        if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
+          url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
+        }
+      } else if (!url || url.startsWith('https://images.unsplash.com')) {
+        const builtinSim = getSimulationContent(item);
+        if (builtinSim) {
+          url = 'data:text/html;charset=utf-8,' + encodeURIComponent(builtinSim);
+        } else {
+          url = item.thumbnailUrl || item.thumbnail_url || item.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+        }
+      }
+
+      const downloadUrl = (item.download_url && item.download_url.startsWith('http'))
+        ? item.download_url
+        : (item.fileUrl && item.fileUrl.startsWith('http') && !item.fileUrl.startsWith('https://images.unsplash.com'))
+        ? item.fileUrl
+        : (url.startsWith('http') && !url.startsWith('https://images.unsplash.com') ? url : undefined);
+
+      const now = new Date().toISOString();
+      const finalStatus: ResourceStatus = isAdmin ? (item.status || 'published') : 'pending';
+      const finalPublishedAt: string | null = (isAdmin && finalStatus === 'published')
+        ? (item.publishedAt || now)
+        : null;
+
+      // Confirmed database columns only:
+      // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at
+      const row: Record<string, unknown> = {
+        id,
+        title: item.title || 'مورد تعليمي بدون عنوان',
+        description: item.description || '',
+        type: item.resourceType || item.type || 'محاكاة',
+        subject: subjectName,
+        grade: gradeName,
+        url,
+        created_at: item.createdAt || now,
+        status: finalStatus,
+        user_id: authUserId,
+        published_at: finalPublishedAt
+      };
+
+      if (downloadUrl) {
+        row.download_url = downloadUrl;
+      }
+
+      const { data, error, status } = await executeWithSchemaFallback(
         (targetRow) => supabase.from('resources').insert(targetRow).select().maybeSingle(),
         row
       );
 
       if (error) {
-        console.error('Supabase INSERT rejected:', error);
-        return { data: null, savedToSupabase: false, error: error.message };
+        console.error('Supabase INSERT rejected:', error, 'status:', status);
+        const detailedMsg = `[Status ${status || 'N/A'}${error.code ? ` - Code ${error.code}` : ''}] ${error.message}`;
+        return { data: null, savedToSupabase: false, error: detailedMsg };
       }
 
       if (data) {
         const mapped = fromSupabaseRow(data as Record<string, unknown>);
-        // Ensure thumbnail, status, and user_id are not lost
         if (item.thumbnailUrl) {
           mapped.thumbnailUrl = item.thumbnailUrl;
           mapped.thumbnail_url = item.thumbnailUrl;
           mapped.image_url = item.thumbnailUrl;
         }
-        if (item.status) mapped.status = item.status;
-        if (item.user_id) mapped.user_id = item.user_id;
+        if (item.authorName) {
+          mapped.authorName = item.authorName;
+          mapped.author = item.authorName;
+        }
         return { data: mapped, savedToSupabase: true };
       }
 
-      return { data: item, savedToSupabase: true };
+      return {
+        data: null,
+        savedToSupabase: false,
+        error: `[Status ${status || 200}] لم يتم تأكيد حفظ المورد في قاعدة البيانات.`
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Supabase INSERT exception:', message);
@@ -387,46 +487,97 @@ export const supabaseResourceService = {
 
   /**
    * Update an existing resource directly in Supabase `resources` table by its UUID.
+   * Enforces:
+   * - Active Supabase Auth session required.
+   * - Publishing (status = 'published') strictly restricted to sciencelibrary8@gmail.com.
+   * - Regular user can update their own resource (via resources_owner_update_policy) but cannot change user_id or status to published.
+   * - Admin can update any resource (via resources_admin_update_policy).
    */
   async updateResource(id: string, updates: Partial<ResourceItem>): Promise<{ data: ResourceItem | null; savedToSupabase: boolean; error?: string }> {
     if (!isValidUuid(id)) {
       return { data: null, savedToSupabase: false, error: `معرف المورد ليس بصيغة UUID صالحة: ${id}` };
     }
 
-    // Requirement 2: Strict write payload containing only confirmed columns in public.resources:
-    // id, title, description, subject, grade, type, url, download_url, created_at
-    const partialRow: Record<string, unknown> = {};
-    if (updates.title !== undefined) partialRow.title = updates.title;
-    if (updates.description !== undefined) partialRow.description = updates.description;
-    if (updates.resourceType !== undefined || updates.type !== undefined) {
-      partialRow.type = updates.resourceType || updates.type;
-    }
-    if (updates.subjectName !== undefined || updates.subjectId !== undefined) {
-      const { subjectName } = normalizeSubject(updates.subjectName || updates.subjectId);
-      partialRow.subject = subjectName;
-    }
-    if (updates.gradeName !== undefined || updates.gradeId !== undefined) {
-      const { gradeName } = normalizeGrade(updates.gradeName || updates.gradeId);
-      partialRow.grade = gradeName;
-    }
-
-    const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
-
-    // Save updated HTML content or file URL to the confirmed 'url' column
-    if (updates.htmlContent !== undefined && updates.htmlContent.trim().length > 0) {
-      partialRow.url = 'data:text/html;charset=utf-8,' + encodeURIComponent(updates.htmlContent);
-    } else if (updates.fileUrl !== undefined || (updates as any).url !== undefined) {
-      partialRow.url = updates.fileUrl || (updates as any).url;
-    } else if (effectiveThumb !== undefined && !updates.fileUrl) {
-      partialRow.url = effectiveThumb;
-    }
-
-    if ((updates as any).download_url !== undefined && typeof (updates as any).download_url === 'string') {
-      partialRow.download_url = (updates as any).download_url;
-    }
-
     try {
-      const { data, error, status, statusText } = await executeWithSchemaFallback(
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr || !sessionData?.session?.user) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'لا توجد جلسة مصادقة نشطة في Supabase. يرجى تسجيل الدخول أولاً لإجراء التعديل.'
+        };
+      }
+
+      const sessionUser = sessionData.session.user;
+      const sessionEmail = (sessionUser.email || '').trim().toLowerCase();
+      const isAdmin = sessionEmail === 'sciencelibrary8@gmail.com';
+
+      // Security check: non-admin cannot publish or approve resources
+      if ((updates.status === 'published' || updates.status === 'approved' || updates.publishedAt !== undefined) && !isAdmin) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'عملية النشر والاعتماد مقتصرة حصرياً على حساب المديرة الرسمي (sciencelibrary8@gmail.com).'
+        };
+      }
+
+      // Build payload strictly with confirmed columns:
+      // title, description, subject, grade, type, url, download_url, status, published_at, user_id
+      const partialRow: Record<string, unknown> = {};
+      if (updates.title !== undefined) partialRow.title = updates.title;
+      if (updates.description !== undefined) partialRow.description = updates.description;
+      if (updates.resourceType !== undefined || updates.type !== undefined) {
+        partialRow.type = updates.resourceType || updates.type;
+      }
+      if (updates.subjectName !== undefined || updates.subjectId !== undefined) {
+        const { subjectName } = normalizeSubject(updates.subjectName || updates.subjectId);
+        partialRow.subject = subjectName;
+      }
+      if (updates.gradeName !== undefined || updates.gradeId !== undefined) {
+        const { gradeName } = normalizeGrade(updates.gradeName || updates.gradeId);
+        partialRow.grade = gradeName;
+      }
+
+      const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
+      if (updates.htmlContent !== undefined && updates.htmlContent.trim().length > 0) {
+        partialRow.url = 'data:text/html;charset=utf-8,' + encodeURIComponent(updates.htmlContent);
+      } else if (updates.fileUrl !== undefined || (updates as any).url !== undefined) {
+        partialRow.url = updates.fileUrl || (updates as any).url;
+      } else if (effectiveThumb !== undefined && !updates.fileUrl) {
+        partialRow.url = effectiveThumb;
+      }
+
+      if ((updates as any).download_url !== undefined && typeof (updates as any).download_url === 'string') {
+        partialRow.download_url = (updates as any).download_url;
+      }
+
+      // Status & published_at columns
+      if (updates.status !== undefined) {
+        partialRow.status = updates.status;
+        if (updates.status === 'published') {
+          partialRow.published_at = updates.publishedAt || new Date().toISOString();
+        } else if (updates.publishedAt === undefined) {
+          partialRow.published_at = null;
+        }
+      } else if (updates.publishedAt !== undefined) {
+        partialRow.published_at = updates.publishedAt;
+      }
+
+      // Only admin can reassign user_id, and it must be a valid UUID
+      if (isAdmin && (updates as any).user_id && isValidUuid((updates as any).user_id)) {
+        partialRow.user_id = (updates as any).user_id;
+      }
+
+      // Prevent empty UPDATE payload
+      if (Object.keys(partialRow).length === 0) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'لا توجد حقول مدعومة للتحديث في جدول resources.'
+        };
+      }
+
+      const { data, error, status } = await executeWithSchemaFallback(
         (targetRow) => supabase.from('resources').update(targetRow).eq('id', id).select().maybeSingle(),
         partialRow
       );
@@ -439,16 +590,12 @@ export const supabaseResourceService = {
 
       if (data) {
         const mapped = fromSupabaseRow(data as Record<string, unknown>);
-        // Guarantee that the new thumbnail, status, and updates are preserved immediately in the return
         if (effectiveThumb) {
           mapped.thumbnailUrl = effectiveThumb;
           mapped.thumbnail_url = effectiveThumb;
           mapped.image_url = effectiveThumb;
         }
-        if (updates.status) {
-          mapped.status = updates.status === 'submitted' ? 'pending' : updates.status;
-        }
-        return { data: { ...mapped, ...updates, ...(effectiveThumb ? { thumbnailUrl: effectiveThumb, thumbnail_url: effectiveThumb, image_url: effectiveThumb } : {}) }, savedToSupabase: true };
+        return { data: { ...mapped, ...updates }, savedToSupabase: true };
       }
 
       return {
@@ -459,6 +606,131 @@ export const supabaseResourceService = {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Supabase UPDATE exception:', message);
+      return { data: null, savedToSupabase: false, error: message };
+    }
+  },
+
+  /**
+   * Publish a resource to public.resources.
+   * Strictly restricted to the official administrator: sciencelibrary8@gmail.com.
+   * Updates `status = 'published'` and `published_at = now()`.
+   */
+  async publishResource(id: string): Promise<{ data: ResourceItem | null; savedToSupabase: boolean; error?: string }> {
+    if (!isValidUuid(id)) {
+      return { data: null, savedToSupabase: false, error: `معرف المورد ليس بصيغة UUID صالحة: ${id}` };
+    }
+
+    try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr || !sessionData?.session?.user) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'لا توجد جلسة مصادقة نشطة في Supabase. يرجى تسجيل الدخول الفعلي بحساب المديرة أولاً للمتابعة ونشر المورد.'
+        };
+      }
+
+      const sessionEmail = (sessionData.session.user.email || '').trim().toLowerCase();
+      if (sessionEmail !== 'sciencelibrary8@gmail.com') {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: `حساب الجلسة الحالي (${sessionEmail}) غير مخول بنشر الموارد. النشر مقتصر على حساب المديرة الرسمي (sciencelibrary8@gmail.com).`
+        };
+      }
+
+      const now = new Date().toISOString();
+      const payload = {
+        status: 'published',
+        published_at: now
+      };
+
+      const { data, error, status } = await executeWithSchemaFallback(
+        (targetRow) => supabase.from('resources').update(targetRow).eq('id', id).select().maybeSingle(),
+        payload
+      );
+
+      if (error) {
+        console.error('Supabase PUBLISH rejected:', error, 'status:', status);
+        const detailedMsg = `[Status ${status || 'N/A'}${error.code ? ` - Code ${error.code}` : ''}] ${error.message}`;
+        return { data: null, savedToSupabase: false, error: detailedMsg };
+      }
+
+      if (!data) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: `[Status ${status || 200}] لم يتم تحديث أي سجل في قاعدة البيانات (matched 0 rows). تأكد من وجود السجل وصلاحيات سياسة resources_admin_update_policy.`
+        };
+      }
+
+      const mapped = fromSupabaseRow(data as Record<string, unknown>);
+      return { data: mapped, savedToSupabase: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Supabase PUBLISH exception:', message);
+      return { data: null, savedToSupabase: false, error: message };
+    }
+  },
+
+  /**
+   * Unpublish a resource from public.resources (reverts to 'approved' and clears published_at).
+   * Strictly restricted to the official administrator: sciencelibrary8@gmail.com.
+   */
+  async unpublishResource(id: string): Promise<{ data: ResourceItem | null; savedToSupabase: boolean; error?: string }> {
+    if (!isValidUuid(id)) {
+      return { data: null, savedToSupabase: false, error: `معرف المورد ليس بصيغة UUID صالحة: ${id}` };
+    }
+
+    try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr || !sessionData?.session?.user) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'لا توجد جلسة مصادقة نشطة في Supabase.'
+        };
+      }
+
+      const sessionEmail = (sessionData.session.user.email || '').trim().toLowerCase();
+      if (sessionEmail !== 'sciencelibrary8@gmail.com') {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: 'إلغاء النشر مقتصر على حساب المديرة الرسمي (sciencelibrary8@gmail.com).'
+        };
+      }
+
+      const payload = {
+        status: 'approved',
+        published_at: null
+      };
+
+      const { data, error, status } = await executeWithSchemaFallback(
+        (targetRow) => supabase.from('resources').update(targetRow).eq('id', id).select().maybeSingle(),
+        payload
+      );
+
+      if (error) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: `[Status ${status || 'N/A'}] ${error.message}`
+        };
+      }
+
+      if (!data) {
+        return {
+          data: null,
+          savedToSupabase: false,
+          error: `[Status ${status || 200}] لم يتم العثور على المورد المطلوب لتحديثه (matched 0 rows).`
+        };
+      }
+
+      const mapped = fromSupabaseRow(data as Record<string, unknown>);
+      return { data: mapped, savedToSupabase: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return { data: null, savedToSupabase: false, error: message };
     }
   },

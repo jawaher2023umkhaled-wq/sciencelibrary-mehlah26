@@ -13,6 +13,7 @@ import {
   AuditLogItem
 } from '../types';
 import { storageService } from '../services/storageService';
+import { supabase } from '../services/supabase';
 import { supabaseResourceService, generateUuid, isValidUuid } from '../services/supabaseResourceService';
 import { supabaseNotificationService } from '../services/supabaseNotificationService';
 import { useAuth } from './AuthContext';
@@ -334,21 +335,40 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const createResource = async (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'> & { id?: string }): Promise<ResourceItem | null> => {
+    // 1. Verify authenticated Supabase session to get actual auth.uid() UUID
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    const sessionUser = sessionData?.session?.user;
+    if (sessionErr || !sessionUser) {
+      showToast('يجب تسجيل الدخول أولاً بحساب معتمد في Supabase لإدراج مورد.', 'warning');
+      return null;
+    }
+
+    const sessionEmail = (sessionUser.email || '').trim().toLowerCase();
+    const isAdmin = sessionEmail === 'sciencelibrary8@gmail.com';
+    const authUserId = sessionUser.id; // True UUID from Supabase Auth
+
     const newId = resourceData.id && isValidUuid(resourceData.id) ? resourceData.id : generateUuid();
     const now = new Date().toISOString();
-    const isPendingReview = resourceData.status === 'pending' || resourceData.status === 'submitted';
-    const effectiveStatus: ResourceStatus = isPendingReview ? 'pending' : (resourceData.status || 'pending');
-    const effectiveUserId = (resourceData as any).user_id || resourceData.authorId || user?.id || 'admin';
+
+    // Rule: regular user => status = 'pending', published_at = null, user_id = auth.uid()
+    const effectiveStatus: ResourceStatus = isAdmin
+      ? (resourceData.status || 'published')
+      : 'pending';
+
+    const effectivePublishedAt = (isAdmin && effectiveStatus === 'published')
+      ? (resourceData.publishedAt || now)
+      : undefined;
+
     const effectiveThumb = resourceData.thumbnailUrl || (resourceData as any).thumbnail_url || (resourceData as any).image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
 
     const preparedResource: ResourceItem = {
       ...resourceData,
       id: newId,
       status: effectiveStatus,
-      user_id: effectiveUserId,
-      authorId: resourceData.authorId || effectiveUserId,
-      authorName: resourceData.authorName || user?.displayName || 'مكتبة العلوم الرقمية',
-      author: (resourceData as any).author || resourceData.authorName || user?.displayName,
+      user_id: authUserId,
+      authorId: authUserId,
+      authorName: resourceData.authorName || sessionUser.user_metadata?.displayName || user?.displayName || (isAdmin ? 'مدير مكتبة العلوم الرقمية' : sessionEmail.split('@')[0]),
+      author: resourceData.author || resourceData.authorName || user?.displayName,
       thumbnailUrl: effectiveThumb,
       thumbnail_url: effectiveThumb,
       image_url: effectiveThumb,
@@ -358,7 +378,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       downloadCount: 0,
       createdAt: now,
       updatedAt: now,
-      publishedAt: effectiveStatus === 'published' ? now : undefined,
+      publishedAt: effectivePublishedAt,
       versions: [
         {
           versionNumber: resourceData.version || 'الإصدار 1.0',
@@ -384,19 +404,19 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // Audit log
       storageService.addAuditLog({
-        actorId: effectiveUserId,
-        userId: effectiveUserId,
+        actorId: authUserId,
+        userId: authUserId,
         actorName: preparedResource.authorName,
-        action: isPendingReview ? 'submit' : 'create',
+        action: effectiveStatus === 'published' ? 'publish' : 'submit',
         resourceId: savedRecord.id,
         resourceTitle: savedRecord.title,
-        details: isPendingReview ? 'إنشاء المورد وإرساله للتحكيم (قيد المراجعة)' : 'إنشاء مسودة مورد جديد'
+        details: effectiveStatus === 'published' ? 'إنشاء المورد ونشره مباشرة كمسؤول' : 'إنشاء المورد وإرساله للتحكيم (قيد المراجعة)'
       });
 
       // Notification
-      if (isPendingReview) {
+      if (effectiveStatus === 'pending') {
         const notifPayload = {
-          userId: effectiveUserId,
+          userId: authUserId,
           title: 'تم إرسال المورد للمراجعة',
           message: `تم استلام المورد "${savedRecord.title}" بنجاح وإحالته إلى لجنة التحكيم وحالته الآن قيد المراجعة.`,
           resourceId: savedRecord.id,
@@ -407,14 +427,19 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         refreshNotifications();
       }
 
-      showToast('تم حفظ المورد بنجاح في قاعدة بيانات Supabase (UUID مسجل)', 'success');
+      showToast(
+        effectiveStatus === 'published'
+          ? 'تم حفظ ونشر المورد بنجاح في قاعدة بيانات Supabase'
+          : 'تم حفظ المورد وإرساله للمراجعة بنجاح في قاعدة بيانات Supabase (قيد المراجعة)',
+        'success'
+      );
       return savedRecord;
     } else {
       console.error('Supabase create persistence failure:', error);
       // Ensure the resource is NOT in UI state and NOT in cache
       setResources(prev => prev.filter(r => r.id !== newId));
       storageService.deleteResource(newId);
-      const actionableError = error || 'تعذر حفظ المورد في Supabase. يرجى التأكد من تسجيل الدخول كمدير نظام معتمد.';
+      const actionableError = error || 'تعذر حفظ المورد في Supabase.';
       showToast(`فشل حفظ المورد في Supabase: ${actionableError}`, 'error');
       return null;
     }
@@ -426,12 +451,10 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
     const isPendingReview = updates.status === 'pending' || updates.status === 'submitted';
     const effectiveStatus: ResourceStatus | undefined = isPendingReview ? 'pending' : updates.status;
-    const effectiveUserId = (updates as any).user_id || user?.id;
 
     const normalizedUpdates: Partial<ResourceItem> = {
       ...updates,
       ...(effectiveStatus !== undefined ? { status: effectiveStatus } : {}),
-      ...(effectiveUserId ? { user_id: effectiveUserId } : {}),
       ...(effectiveThumb ? {
         thumbnailUrl: effectiveThumb,
         thumbnail_url: effectiveThumb,
@@ -442,7 +465,27 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // 1. Keep reference to previous state for reliable rollback
     if (!previousResource) return;
 
-    // 2. Optimistically update local React state for responsive feedback
+    // 2. Check if this update contains database columns
+    // Confirmed columns in public.resources:
+    // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at
+    const hasDatabaseColumns =
+      updates.title !== undefined ||
+      updates.description !== undefined ||
+      updates.subjectName !== undefined ||
+      updates.subjectId !== undefined ||
+      updates.gradeName !== undefined ||
+      updates.gradeId !== undefined ||
+      updates.resourceType !== undefined ||
+      updates.type !== undefined ||
+      updates.htmlContent !== undefined ||
+      updates.fileUrl !== undefined ||
+      updates.status !== undefined ||
+      (updates as any).publishedAt !== undefined ||
+      (updates as any).published_at !== undefined ||
+      (updates as any).url !== undefined ||
+      (updates as any).download_url !== undefined;
+
+    // Optimistically update local React state
     const optimisticResource: ResourceItem = {
       ...previousResource,
       ...normalizedUpdates,
@@ -458,83 +501,176 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setActiveResource(optimisticResource);
     }
 
-    // 3. Direct persistence to Supabase resources table first; local storage is NOT updated until confirmed
-    supabaseResourceService.updateResource(id, normalizedUpdates).then(({ data: savedRecord, savedToSupabase, error }) => {
-      if (savedToSupabase && savedRecord) {
-        setIsSupabaseLive(true);
-        // Keep updated thumbnail in React state even if database doesn't echo it
-        const finalRecord: ResourceItem = {
-          ...savedRecord,
-          ...(effectiveThumb ? {
-            thumbnailUrl: effectiveThumb,
-            thumbnail_url: effectiveThumb,
-            image_url: effectiveThumb
-          } : {})
-        };
+    // 3. Direct persistence to Supabase resources table if DB columns are modified
+    if (hasDatabaseColumns) {
+      supabaseResourceService.updateResource(id, normalizedUpdates).then(({ data: savedRecord, savedToSupabase, error }) => {
+        if (savedToSupabase && savedRecord) {
+          setIsSupabaseLive(true);
+          const finalRecord: ResourceItem = {
+            ...savedRecord,
+            ...(effectiveThumb ? {
+              thumbnailUrl: effectiveThumb,
+              thumbnail_url: effectiveThumb,
+              image_url: effectiveThumb
+            } : {})
+          };
 
-        // Only persist to local storage cache after confirmed database save
-        storageService.updateResource(id, finalRecord);
+          storageService.updateResource(id, finalRecord);
 
-        setResources(prev => prev.map(r => r.id === id ? { ...r, ...finalRecord } : r));
-        if (activeResource && activeResource.id === id) {
-          setActiveResource(prev => prev && prev.id === id ? { ...prev, ...finalRecord } : null);
+          setResources(prev => prev.map(r => r.id === id ? { ...r, ...finalRecord } : r));
+          if (activeResource && activeResource.id === id) {
+            setActiveResource(prev => prev && prev.id === id ? { ...prev, ...finalRecord } : null);
+          }
+          refreshNotifications();
+          showToast('تم تحديث بيانات المورد في Supabase بنجاح', 'success');
+        } else {
+          console.error('Supabase update persistence failure:', error);
+          // Rollback optimistic React state on failure
+          setResources(prev => prev.map(r => r.id === id ? previousResource : r));
+          if (activeResource && activeResource.id === id) {
+            setActiveResource(previousResource);
+          }
+          storageService.updateResource(id, previousResource);
+          refreshNotifications();
+          const actionableError = error || 'لم يتم تحديث أي سجل في قاعدة البيانات (matched 0 rows). قد تكون سياسة RLS تمنع التحديث للحساب الحالي أو أن المورد غير موجود.';
+          showToast(`فشل تحديث المورد في Supabase: ${actionableError}`, 'error');
         }
-        refreshNotifications();
-        showToast('تم تحديث المورد ومزامنته مع Supabase بنجاح', 'success');
-      } else {
-        console.error('Supabase update persistence failure:', error);
-        // Rollback optimistic React state on failure
-        setResources(prev => prev.map(r => r.id === id ? previousResource : r));
-        if (activeResource && activeResource.id === id) {
-          setActiveResource(previousResource);
-        }
-        // Ensure local storage cache remains uncorrupted previous state
-        storageService.updateResource(id, previousResource);
-        refreshNotifications();
-        const actionableError = error || 'لم يتم تحديث أي سجل في قاعدة البيانات. قد تكون صلاحيات الحساب غير كافية أو أن المورد غير موجود.';
-        showToast(`فشل تحديث المورد في Supabase: ${actionableError}`, 'error');
-      }
+      });
+    } else {
+      storageService.updateResource(id, optimisticResource);
+      refreshNotifications();
+    }
+  };
+
+  const startReview = async (id: string) => {
+    const previous = resources.find(r => r.id === id);
+    const { data: savedRecord, savedToSupabase, error } = await supabaseResourceService.updateResource(id, {
+      status: 'under_review'
     });
-  };
 
-  const startReview = (id: string) => {
-    updateResource(id, { status: 'under_review' });
-    showToast('بدأت عملية المراجعة الأكاديمية للمورد', 'info');
-  };
-
-  const reviewResource = (id: string, status: ResourceStatus, comment: string) => {
-    if (!user) return;
-    const updated = storageService.reviewResource(id, user.id, user.displayName, status, comment);
-    refreshResources();
-    refreshNotifications();
-    if (activeResource && activeResource.id === id && updated) {
-      setActiveResource(updated);
-    }
-
-    if (status === 'approved') {
-      showToast('تم اعتماد المورد بنجاح', 'success');
-    } else if (status === 'published') {
-      showToast('تم نشر المورد بنجاح في المكتبة', 'success');
-    } else if (status === 'needs_revision') {
-      showToast('تم إرجاع المورد للتعديل', 'warning');
-    } else if (status === 'rejected') {
-      showToast('تم رفض المورد', 'error');
+    if (savedToSupabase && savedRecord) {
+      setResources(prev => prev.map(r => r.id === id ? { ...r, ...savedRecord, status: 'under_review' } : r));
+      storageService.updateResource(id, { status: 'under_review' });
+      showToast('بدأت عملية المراجعة الأكاديمية للمورد وتم حفظ الحالة في قاعدة البيانات', 'info');
+    } else {
+      if (previous) {
+        setResources(prev => prev.map(r => r.id === id ? previous : r));
+      }
+      showToast(`تعذر بدء المراجعة في Supabase: ${error || 'فشل التحديث'}`, 'error');
     }
   };
 
-  const publishResource = (id: string) => {
-    updateResource(id, { status: 'published', publishedAt: new Date().toISOString() });
-    showToast('تم نشر المورد بنجاح في المكتبة', 'success');
+  const reviewResource = async (id: string, status: ResourceStatus, comment: string) => {
+    if (!user) {
+      showToast('يرجى تسجيل الدخول أولاً لإجراء المراجعة والتحكيم', 'warning');
+      return;
+    }
+    const previous = resources.find(r => r.id === id);
+
+    // Persist status change to Supabase resources table
+    const { data: savedRecord, savedToSupabase, error } = await supabaseResourceService.updateResource(id, {
+      status
+    });
+
+    if (savedToSupabase && savedRecord) {
+      const updated = storageService.reviewResource(id, user.id, user.displayName, status, comment);
+      const finalItem = updated ? { ...updated, ...savedRecord, status } : { ...savedRecord, status };
+      setResources(prev => prev.map(r => r.id === id ? finalItem : r));
+      if (activeResource && activeResource.id === id) {
+        setActiveResource(finalItem);
+      }
+      refreshNotifications();
+
+      if (status === 'approved') {
+        showToast('تم اعتماد المورد بنجاح في قاعدة البيانات', 'success');
+      } else if (status === 'needs_revision') {
+        showToast('تم إرجاع المورد للتعديل وحفظ الحالة في قاعدة البيانات', 'warning');
+      } else if (status === 'rejected') {
+        showToast('تم رفض المورد وحفظ الحالة في قاعدة البيانات', 'error');
+      } else {
+        showToast('تم تحديث حالة المورد في Supabase', 'success');
+      }
+    } else {
+      if (previous) {
+        setResources(prev => prev.map(r => r.id === id ? previous : r));
+      }
+      const actionableError = error || 'تعذر تحديث حالة المورد في قاعدة البيانات.';
+      showToast(`فشل مراجعة المورد في Supabase: ${actionableError}`, 'error');
+    }
   };
 
-  const unpublishResource = (id: string) => {
-    storageService.unpublishResource(id);
-    refreshResources();
-    if (activeResource && activeResource.id === id) {
-      const updated = storageService.getResourceById(id);
-      if (updated) setActiveResource(updated);
+  const publishResource = async (id: string) => {
+    const previous = resources.find(r => r.id === id);
+
+    // 1. Verify active Supabase authentication session first
+    try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) {
+        showToast(`خطأ في التحقق من جلسة المصادقة: ${sessionErr.message}`, 'error');
+        return;
+      }
+
+      const activeEmail = sessionData?.session?.user?.email?.trim().toLowerCase();
+      if (!activeEmail) {
+        showToast('يرجى تسجيل الدخول الفعلي بحساب المديرة أولاً للمتابعة ونشر المورد.', 'warning');
+        return;
+      }
+
+      if (activeEmail !== 'sciencelibrary8@gmail.com') {
+        showToast(`الحساب الحالي (${activeEmail}) ليس حساب المديرة الرسمي المعتمد (sciencelibrary8@gmail.com). تم رفض النشر.`, 'error');
+        return;
+      }
+    } catch (authErr: unknown) {
+      const msg = authErr instanceof Error ? authErr.message : String(authErr);
+      showToast(`فشل التحقق من الجلسة: ${msg}`, 'error');
+      return;
     }
-    showToast('تم إلغاء نشر المورد وإعادته إلى المعتمدة', 'info');
+
+    // 2. Perform publishing in Supabase resources table (Authoritative Save)
+    const { data: savedRecord, savedToSupabase, error } = await supabaseResourceService.publishResource(id);
+
+    if (savedToSupabase && savedRecord) {
+      setResources(prev => prev.map(r => r.id === id ? { ...r, ...savedRecord, status: 'published', publishedAt: savedRecord.publishedAt || new Date().toISOString() } : r));
+      if (activeResource && activeResource.id === id) {
+        setActiveResource({ ...activeResource, ...savedRecord, status: 'published', publishedAt: savedRecord.publishedAt || new Date().toISOString() });
+      }
+      storageService.updateResource(id, {
+        status: 'published',
+        publishedAt: savedRecord.publishedAt || new Date().toISOString()
+      });
+      refreshNotifications();
+      showToast('تم نشر المورد بنجاح وتحديث حالته في قاعدة بيانات Supabase', 'success');
+    } else {
+      if (previous) {
+        setResources(prev => prev.map(r => r.id === id ? previous : r));
+      }
+      const actionableError = error || 'تعذر نشر المورد في قاعدة البيانات (matched 0 rows).';
+      showToast(`فشل نشر المورد في Supabase: ${actionableError}`, 'error');
+    }
+  };
+
+  const unpublishResource = async (id: string) => {
+    const previous = resources.find(r => r.id === id);
+
+    const { data: savedRecord, savedToSupabase, error } = await supabaseResourceService.unpublishResource(id);
+
+    if (savedToSupabase && savedRecord) {
+      setResources(prev => prev.map(r => r.id === id ? { ...r, ...savedRecord, status: 'approved', publishedAt: undefined } : r));
+      if (activeResource && activeResource.id === id) {
+        setActiveResource({ ...activeResource, ...savedRecord, status: 'approved', publishedAt: undefined });
+      }
+      storageService.updateResource(id, {
+        status: 'approved',
+        publishedAt: undefined
+      });
+      showToast('تم إلغاء نشر المورد وإعادته إلى قائمة المعتمدة في Supabase', 'info');
+    } else {
+      if (previous) {
+        setResources(prev => prev.map(r => r.id === id ? previous : r));
+      }
+      const actionableError = error || 'تعذر إلغاء نشر المورد في قاعدة البيانات.';
+      showToast(`فشل إلغاء نشر المورد في Supabase: ${actionableError}`, 'error');
+    }
   };
 
   const archiveResource = (id: string) => {
