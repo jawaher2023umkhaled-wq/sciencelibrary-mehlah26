@@ -962,20 +962,70 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     refreshCurriculum();
   };
 
-  const downloadResource = (resource: ResourceItem) => {
+  const downloadResource = async (resource: ResourceItem) => {
     storageService.incrementUsage(resource.id, 'download');
     refreshResources();
 
     const storageOrHttpUrl = (resource.download_url && resource.download_url.startsWith('http'))
       ? resource.download_url
+      : (resource.url && resource.url.startsWith('http') && !resource.url.startsWith('https://images.unsplash.com'))
+      ? resource.url
       : (resource.fileUrl && resource.fileUrl.startsWith('http') && !resource.fileUrl.startsWith('https://images.unsplash.com'))
       ? resource.fileUrl
       : undefined;
 
+    const isPdf = Boolean(
+      (storageOrHttpUrl && (storageOrHttpUrl.toLowerCase().endsWith('.pdf') || storageOrHttpUrl.toLowerCase().includes('.pdf?'))) ||
+      (resource.fileType === '.pdf') ||
+      (resource.fileName && resource.fileName.toLowerCase().endsWith('.pdf')) ||
+      (resource.resourceType && resource.resourceType.toLowerCase().includes('pdf')) ||
+      (resource.type && resource.type.toLowerCase().includes('pdf'))
+    );
+
+    let targetFileName = resource.fileName;
+    if (isPdf) {
+      if (!targetFileName || !targetFileName.toLowerCase().endsWith('.pdf')) {
+        if (storageOrHttpUrl && storageOrHttpUrl.includes('/')) {
+          const rawPart = storageOrHttpUrl.split('/').pop()?.split('?')[0];
+          if (rawPart && rawPart.toLowerCase().endsWith('.pdf')) {
+            try {
+              targetFileName = decodeURIComponent(rawPart);
+            } catch {
+              targetFileName = rawPart;
+            }
+          }
+        }
+        if (!targetFileName || !targetFileName.toLowerCase().endsWith('.pdf')) {
+          targetFileName = `${(resource.title || 'document').replace(/\s+/g, '_')}.pdf`;
+        }
+      }
+    } else if (!targetFileName) {
+      targetFileName = `${(resource.title || 'resource').replace(/\s+/g, '_')}.html`;
+    }
+
     if (storageOrHttpUrl) {
+      try {
+        const response = await fetch(storageOrHttpUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = targetFileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(blobUrl);
+          showToast(`تم تحميل الملف (${targetFileName}) بنجاح`, 'success');
+          return;
+        }
+      } catch (fetchErr) {
+        console.warn('Direct blob fetch failed, falling back to anchor download:', fetchErr);
+      }
+
       const a = document.createElement('a');
       a.href = storageOrHttpUrl;
-      a.download = resource.fileName || `${(resource.title || 'resource').replace(/\s+/g, '_')}.html`;
+      a.download = targetFileName;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
@@ -985,7 +1035,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    // Fallback: Create a real downloadable file from memory content
+    // Fallback: Create a real downloadable file from memory content for legacy resources
     const content = resource.htmlContent || `مكتبة العلوم الرقمية - مدرسة محلاح للبنات (5-12)\n\nعنوان المورد: ${resource.title}\nالصف: ${resource.gradeName}\nالمادة: ${resource.subjectName}\nنوع المورد: ${resource.resourceType}\nالوحدة: ${resource.unit}\nالموضوع: ${resource.topic}\nالوصف:\n${resource.description}\n\nتاريخ الإنشاء: ${resource.createdAt}\nالكاتب: ${resource.authorName}\nالإصدار: ${resource.version}`;
     const mime = resource.htmlContent ? 'text/html;charset=utf-8' : 'text/plain;charset=utf-8';
     const blob = new Blob([content], { type: mime });

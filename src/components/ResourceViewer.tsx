@@ -43,6 +43,18 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
   // Check if resource is an interactive HTML simulation safely (unconditional Hook call)
   const isInteractive = useMemo(() => Boolean(resource && typeof resource === 'object' && isResourceInteractive(resource)), [resource]);
 
+  const isPdf = useMemo(() => Boolean(
+    resource && (
+      (resource.fileType === '.pdf') ||
+      (resource.fileName && resource.fileName.toLowerCase().endsWith('.pdf')) ||
+      (resource.url && (resource.url.toLowerCase().endsWith('.pdf') || resource.url.toLowerCase().includes('.pdf?'))) ||
+      (resource.download_url && (resource.download_url.toLowerCase().endsWith('.pdf') || resource.download_url.toLowerCase().includes('.pdf?'))) ||
+      (resource.fileUrl && (resource.fileUrl.toLowerCase().endsWith('.pdf') || resource.fileUrl.toLowerCase().includes('.pdf?'))) ||
+      (resource.resourceType && resource.resourceType.toLowerCase().includes('pdf')) ||
+      (resource.type && resource.type.toLowerCase().includes('pdf'))
+    )
+  ), [resource]);
+
   // Resolve HTML code from all possible sources (unconditional Hook call):
   // 1. Direct htmlContent or html_content property
   // 2. data:text/html data URL in fileUrl, file_url, or url
@@ -58,6 +70,12 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
       return;
     }
 
+    // PDF files do not require HTML fetching or simulation matching
+    if (isPdf) {
+      setIsLoading(false);
+      return;
+    }
+
     // 1. Direct HTML content property
     const directHtml = resource.htmlContent || resource.html_content;
     if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) {
@@ -66,7 +84,7 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
       return;
     }
 
-    const fileUrl = resource.fileUrl || resource.file_url || resource.url || '';
+    const fileUrl = resource.download_url || resource.url || resource.fileUrl || resource.file_url || '';
 
     // 2. Check Data URL (UTF-8 or Base64)
     if (fileUrl.startsWith('data:text/html;charset=utf-8,')) {
@@ -103,7 +121,7 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     }
 
     // 4. If it is an external or Supabase Storage URL (.html file), attempt to fetch it for seamless srcDoc embedding
-    const isHtmlUrl = fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm') || fileUrl.includes('/storage/');
+    const isHtmlUrl = fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm');
     const isImage = fileUrl.startsWith('https://images.unsplash.com') || /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(fileUrl);
 
     if ((fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('/')) && !isImage) {
@@ -137,7 +155,7 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     }
 
     setIsLoading(false);
-  }, [resource, isOpen]);
+  }, [resource, isOpen, isPdf]);
 
   // If not open, safely return null AFTER all hooks have executed
   if (!isOpen) {
@@ -180,27 +198,30 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     }
   };
 
-  // Determine effective HTML content for srcDoc
-  const resolvedHtmlContent = resource?.htmlContent || resource?.html_content || fetchedHtml || (resource ? getSimulationContent(resource) : null);
+  // Determine effective HTML content for srcDoc (for simulations/HTML only)
+  const resolvedHtmlContent = !isPdf
+    ? (resource?.htmlContent || resource?.html_content || fetchedHtml || (resource ? getSimulationContent(resource) : null))
+    : null;
 
-  const fileUrl = resource?.fileUrl || resource?.file_url || resource?.url || '';
+  const fileUrl = resource?.download_url || resource?.url || resource?.fileUrl || resource?.file_url || '';
   const isImage = fileUrl.startsWith('https://images.unsplash.com') || /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(fileUrl);
-  const isStorageOrHtmlUrl = (fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('/')) && !isImage && (fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm') || fileUrl.includes('/storage/'));
+  const isStorageOrHtmlUrl = !isPdf && (fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('/')) && !isImage && (fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm'));
 
   // Determine whether to use srcDoc or public src URL
   let effectiveSrcDoc: string | undefined = undefined;
   let effectiveSrc: string | undefined = undefined;
 
-  if (resolvedHtmlContent) {
+  if (isPdf) {
+    effectiveSrcDoc = undefined;
+    effectiveSrc = fileUrl;
+  } else if (resolvedHtmlContent) {
     effectiveSrcDoc = resolvedHtmlContent;
   } else if (isStorageOrHtmlUrl) {
     effectiveSrc = fileUrl;
   } else if (isInteractive || resource?.type === 'simulation' || (resource?.resourceType || '').toLowerCase().includes('simulation') || (resource?.resourceType || '').includes('محاكاة') || (resource?.resourceType || '').includes('تفاعلي')) {
     effectiveSrcDoc = generateInteractiveSimulationShell(resource);
-  } else if (fileUrl && fileUrl.toLowerCase().endsWith('.pdf')) {
-    effectiveSrc = `https://docs.google.com/viewer?url=${encodeURIComponent(fileUrl)}&embedded=true`;
   } else {
-    effectiveSrcDoc = generateInteractiveSimulationShell(resource);
+    effectiveSrc = fileUrl;
   }
 
   const safeTitle = resource?.title || 'مورد تعليمي';
@@ -331,8 +352,8 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
               title={safeTitle}
               onLoad={() => setIsLoading(false)}
               className="w-full h-full border-none bg-slate-950"
-              // Security Sandbox allowing scripts, forms, and popups for simulations in isolated opaque origin:
-              sandbox="allow-scripts allow-forms allow-popups"
+              // Security Sandbox allowing scripts, forms, and popups for simulations in isolated opaque origin; omitted for PDFs so native PDF reader can render
+              sandbox={isPdf ? undefined : "allow-scripts allow-forms allow-popups"}
             />
           </div>
 

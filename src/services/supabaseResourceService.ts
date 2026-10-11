@@ -85,24 +85,37 @@ export function normalizeSubject(subjectStr?: string | null): { subjectId: strin
 export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
   const id = isValidUuid(item.id) ? item.id : generateUuid();
 
-  const rawHtml = item.htmlContent || item.html_content;
-  let url = item.fileUrl || item.file_url || '';
+  const isPdf =
+    (item.fileType === '.pdf') ||
+    (item.fileName && item.fileName.toLowerCase().endsWith('.pdf')) ||
+    (item.url && (item.url.toLowerCase().endsWith('.pdf') || item.url.toLowerCase().includes('.pdf?'))) ||
+    (item.download_url && (item.download_url.toLowerCase().endsWith('.pdf') || item.download_url.toLowerCase().includes('.pdf?'))) ||
+    (item.fileUrl && (item.fileUrl.toLowerCase().endsWith('.pdf') || item.fileUrl.toLowerCase().includes('.pdf?'))) ||
+    (item.resourceType && item.resourceType.toLowerCase().includes('pdf')) ||
+    (item.type && item.type.toLowerCase().includes('pdf'));
 
-  if (rawHtml && rawHtml.trim().length > 0) {
-    if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
-      url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
-    }
-  } else if (!url || url.startsWith('https://images.unsplash.com')) {
-    const builtinSim = getSimulationContent(item);
-    if (builtinSim) {
-      url = 'data:text/html;charset=utf-8,' + encodeURIComponent(builtinSim);
-    } else {
-      url = item.thumbnailUrl || item.thumbnail_url || item.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+  const rawHtml = isPdf ? undefined : (item.htmlContent || item.html_content);
+  let url = item.url || item.download_url || item.fileUrl || item.file_url || '';
+
+  if (!isPdf) {
+    if (rawHtml && rawHtml.trim().length > 0) {
+      if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
+        url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
+      }
+    } else if (!url || url.startsWith('https://images.unsplash.com')) {
+      const builtinSim = getSimulationContent(item);
+      if (builtinSim) {
+        url = 'data:text/html;charset=utf-8,' + encodeURIComponent(builtinSim);
+      } else {
+        url = item.thumbnailUrl || item.thumbnail_url || item.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+      }
     }
   }
 
   const downloadUrl = (item.download_url && item.download_url.startsWith('http'))
     ? item.download_url
+    : (item.url && item.url.startsWith('http') && !item.url.startsWith('https://images.unsplash.com'))
+    ? item.url
     : (item.fileUrl && item.fileUrl.startsWith('http') && !item.fileUrl.startsWith('https://images.unsplash.com'))
     ? item.fileUrl
     : (url.startsWith('http') && !url.startsWith('https://images.unsplash.com') ? url : undefined);
@@ -116,7 +129,7 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
     id,
     title: item.title || 'مورد تعليمي بدون عنوان',
     description: item.description || '',
-    type: item.resourceType || item.type || 'محاكاة',
+    type: item.resourceType || item.type || (isPdf ? 'ملف PDF' : 'محاكاة'),
     subject: subjectName,
     grade: gradeName,
     url,
@@ -163,49 +176,69 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   const rawHtmlField = row.html_content ? String(row.html_content) : '';
   const createdAt = String(row.created_at || new Date().toISOString());
 
-  // Detect and decode HTML content from database record
+  const rawUrlLower = rawUrl.toLowerCase();
+  const downloadUrlLower = downloadUrl.toLowerCase();
+  const typeLower = type.toLowerCase();
+
+  const isPdf =
+    rawUrlLower.endsWith('.pdf') ||
+    rawUrlLower.includes('.pdf?') ||
+    rawUrlLower.includes('.pdf/') ||
+    downloadUrlLower.endsWith('.pdf') ||
+    downloadUrlLower.includes('.pdf?') ||
+    downloadUrlLower.includes('.pdf/') ||
+    typeLower.includes('pdf') ||
+    typeLower === 'ملف pdf';
+
+  // Detect and decode HTML content from database record (NEVER for PDF resources)
   let extractedHtml: string | undefined = undefined;
 
-  if (rawHtmlField && rawHtmlField.trim().length > 0) {
-    extractedHtml = rawHtmlField;
-  } else if (rawUrl.startsWith('data:text/html;charset=utf-8,')) {
-    try {
-      extractedHtml = decodeURIComponent(rawUrl.replace('data:text/html;charset=utf-8,', ''));
-    } catch {
+  if (!isPdf) {
+    if (rawHtmlField && rawHtmlField.trim().length > 0) {
+      extractedHtml = rawHtmlField;
+    } else if (rawUrl.startsWith('data:text/html;charset=utf-8,')) {
+      try {
+        extractedHtml = decodeURIComponent(rawUrl.replace('data:text/html;charset=utf-8,', ''));
+      } catch {
+        extractedHtml = rawUrl;
+      }
+    } else if (rawUrl.startsWith('data:text/html;base64,')) {
+      try {
+        extractedHtml = decodeURIComponent(escape(atob(rawUrl.replace('data:text/html;base64,', ''))));
+      } catch {
+        try {
+          extractedHtml = atob(rawUrl.replace('data:text/html;base64,', ''));
+        } catch {
+          extractedHtml = undefined;
+        }
+      }
+    } else if (rawUrl.trim().startsWith('<!DOCTYPE html') || rawUrl.trim().startsWith('<html') || (rawUrl.includes('</') && rawUrl.includes('<script'))) {
       extractedHtml = rawUrl;
     }
-  } else if (rawUrl.startsWith('data:text/html;base64,')) {
-    try {
-      extractedHtml = decodeURIComponent(escape(atob(rawUrl.replace('data:text/html;base64,', ''))));
-    } catch {
-      try {
-        extractedHtml = atob(rawUrl.replace('data:text/html;base64,', ''));
-      } catch {
-        extractedHtml = undefined;
-      }
-    }
-  } else if (rawUrl.trim().startsWith('<!DOCTYPE html') || rawUrl.trim().startsWith('<html') || (rawUrl.includes('</') && rawUrl.includes('<script'))) {
-    extractedHtml = rawUrl;
-  }
 
-  // If HTML is still not extracted, check built-in simulation repository
-  if (!extractedHtml) {
-    const builtinSim = getSimulationContent({ title, description, topic: title, resourceType: type, type });
-    if (builtinSim) {
-      extractedHtml = builtinSim;
+    // If HTML is still not extracted and NOT an external URL or PDF, check built-in simulation repository
+    if (!extractedHtml && !rawUrl.startsWith('http')) {
+      const builtinSim = getSimulationContent({ title, description, topic: title, resourceType: type, type });
+      if (builtinSim) {
+        extractedHtml = builtinSim;
+      }
     }
   }
 
   const isRawUrlImage = rawUrl.startsWith('https://images.unsplash.com') ||
                         /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(rawUrl);
 
-  const isRawUrlHtmlOrStorage = rawUrl.toLowerCase().includes('.html') ||
-                                rawUrl.toLowerCase().includes('.htm') ||
-                                rawUrl.includes('/storage/') ||
-                                rawUrl.startsWith('data:text/html');
+  const isRawUrlHtmlOrStorage = !isPdf && (
+    rawUrl.toLowerCase().includes('.html') ||
+    rawUrl.toLowerCase().includes('.htm') ||
+    (rawUrl.includes('/storage/') && (rawUrl.endsWith('.html') || rawUrl.endsWith('.htm') || rawUrl.endsWith('.zip'))) ||
+    rawUrl.startsWith('data:text/html')
+  );
 
   let fileUrl: string | undefined = undefined;
-  if (isRawUrlHtmlOrStorage || (!isRawUrlImage && rawUrl.startsWith('http'))) {
+  if (isPdf) {
+    fileUrl = rawUrl || downloadUrl;
+  } else if (isRawUrlHtmlOrStorage || (!isRawUrlImage && rawUrl.startsWith('http'))) {
     fileUrl = rawUrl;
   } else if (downloadUrl && downloadUrl.startsWith('http')) {
     fileUrl = downloadUrl;
@@ -215,6 +248,37 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
 
   // Check local cache for fallback metadata if needed
   const existingLocal = typeof window !== 'undefined' ? storageService.getResourceById(id) : undefined;
+
+  let detectedPdfName = `${title}.pdf`;
+  const pathSource = rawUrl || downloadUrl;
+  if (pathSource && pathSource.includes('/')) {
+    const segment = pathSource.split('/').pop()?.split('?')[0];
+    if (segment && segment.toLowerCase().endsWith('.pdf')) {
+      try {
+        detectedPdfName = decodeURIComponent(segment);
+      } catch {
+        detectedPdfName = segment;
+      }
+    }
+  }
+
+  const finalFileName = isPdf
+    ? (existingLocal?.fileName && existingLocal.fileName.toLowerCase().endsWith('.pdf') ? existingLocal.fileName : detectedPdfName)
+    : (existingLocal?.fileName || `${title}.html`);
+
+  const finalFileType = isPdf
+    ? '.pdf'
+    : (existingLocal?.fileType || (isRawUrlHtmlOrStorage ? '.html' : undefined));
+
+  const isInteractiveType = !isPdf && (
+    typeLower === 'simulation' ||
+    typeLower.includes('simulation') ||
+    typeLower.includes('محاكاة') ||
+    typeLower.includes('تفاعلي') ||
+    typeLower.includes('interactive') ||
+    !!extractedHtml ||
+    Boolean(fileUrl && (fileUrl.includes('.html') || (fileUrl.includes('/storage/') && (fileUrl.endsWith('.html') || fileUrl.endsWith('.htm') || fileUrl.endsWith('.zip')))))
+  );
 
   const rawThumbnailField = row.thumbnail_url || row.image_url || row.thumbnail;
   const thumbnailUrl = rawThumbnailField
@@ -228,16 +292,6 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   const authorName = row.author_name ? String(row.author_name) : (existingLocal?.authorName || 'مكتبة العلوم الرقمية');
   const publishedAt = row.published_at ? String(row.published_at) : (status === 'published' ? createdAt : undefined);
 
-  const typeLower = type.toLowerCase();
-  const isInteractiveType =
-    typeLower === 'simulation' ||
-    typeLower.includes('simulation') ||
-    typeLower.includes('محاكاة') ||
-    typeLower.includes('تفاعلي') ||
-    typeLower.includes('interactive') ||
-    !!extractedHtml ||
-    (fileUrl && (fileUrl.includes('.html') || fileUrl.includes('/storage/')));
-
   const { gradeId, gradeName } = normalizeGrade(grade);
   const { subjectId, subjectName } = normalizeSubject(subject);
   const cleanUnit = (existingLocal?.unit && existingLocal.unit !== 'الوحدة التعليمية') ? existingLocal.unit : '';
@@ -250,14 +304,16 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     thumbnailUrl,
     thumbnail_url: thumbnailUrl,
     image_url: thumbnailUrl,
+    url: rawUrl || downloadUrl || fileUrl,
+    download_url: downloadUrl || rawUrl || fileUrl,
     fileUrl: fileUrl || (extractedHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}` : undefined),
     file_url: fileUrl,
-    htmlContent: extractedHtml,
-    html_content: extractedHtml,
-    fileName: `${title}.html`,
-    fileType: isInteractiveType ? '.html' : undefined,
-    resourceType: type,
-    type,
+    htmlContent: isPdf ? undefined : extractedHtml,
+    html_content: isPdf ? undefined : extractedHtml,
+    fileName: finalFileName,
+    fileType: finalFileType,
+    resourceType: isPdf && (type === 'محاكاة' || !type) ? 'ملف PDF' : type,
+    type: isPdf && (type === 'محاكاة' || !type) ? 'ملف PDF' : type,
     subjectName,
     gradeName,
     gradeId,
@@ -278,7 +334,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     ratingCount: existingLocal?.ratingCount ?? 0,
     usageCount: existingLocal?.usageCount ?? 0,
     downloadCount: existingLocal?.downloadCount ?? 0,
-    previewType: isInteractiveType ? 'html' : 'document',
+    previewType: isPdf ? 'document' : (isInteractiveType ? 'html' : 'document'),
     allowDownload: existingLocal?.allowDownload ?? true,
     allowPreview: existingLocal?.allowPreview ?? true,
     createdAt,
@@ -401,23 +457,37 @@ export const supabaseResourceService = {
       const { gradeName } = normalizeGrade(item.gradeName || item.gradeId);
       const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
 
-      const rawHtml = item.htmlContent || item.html_content;
-      let url = item.fileUrl || item.file_url || '';
-      if (rawHtml && rawHtml.trim().length > 0) {
-        if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
-          url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
-        }
-      } else if (!url || url.startsWith('https://images.unsplash.com')) {
-        const builtinSim = getSimulationContent(item);
-        if (builtinSim) {
-          url = 'data:text/html;charset=utf-8,' + encodeURIComponent(builtinSim);
-        } else {
-          url = item.thumbnailUrl || item.thumbnail_url || item.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+      const isPdf =
+        (item.fileType === '.pdf') ||
+        (item.fileName && item.fileName.toLowerCase().endsWith('.pdf')) ||
+        (item.url && (item.url.toLowerCase().endsWith('.pdf') || item.url.toLowerCase().includes('.pdf?'))) ||
+        (item.download_url && (item.download_url.toLowerCase().endsWith('.pdf') || item.download_url.toLowerCase().includes('.pdf?'))) ||
+        (item.fileUrl && (item.fileUrl.toLowerCase().endsWith('.pdf') || item.fileUrl.toLowerCase().includes('.pdf?'))) ||
+        (item.resourceType && item.resourceType.toLowerCase().includes('pdf')) ||
+        (item.type && item.type.toLowerCase().includes('pdf'));
+
+      const rawHtml = isPdf ? undefined : (item.htmlContent || item.html_content);
+      let url = item.url || item.download_url || item.fileUrl || item.file_url || '';
+
+      if (!isPdf) {
+        if (rawHtml && rawHtml.trim().length > 0) {
+          if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
+            url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
+          }
+        } else if (!url || url.startsWith('https://images.unsplash.com')) {
+          const builtinSim = getSimulationContent(item);
+          if (builtinSim) {
+            url = 'data:text/html;charset=utf-8,' + encodeURIComponent(builtinSim);
+          } else {
+            url = item.thumbnailUrl || item.thumbnail_url || item.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80';
+          }
         }
       }
 
       const downloadUrl = (item.download_url && item.download_url.startsWith('http'))
         ? item.download_url
+        : (item.url && item.url.startsWith('http') && !item.url.startsWith('https://images.unsplash.com'))
+        ? item.url
         : (item.fileUrl && item.fileUrl.startsWith('http') && !item.fileUrl.startsWith('https://images.unsplash.com'))
         ? item.fileUrl
         : (url.startsWith('http') && !url.startsWith('https://images.unsplash.com') ? url : undefined);
@@ -434,7 +504,7 @@ export const supabaseResourceService = {
         id,
         title: item.title || 'مورد تعليمي بدون عنوان',
         description: item.description || '',
-        type: item.resourceType || item.type || 'محاكاة',
+        type: item.resourceType || item.type || (isPdf ? 'ملف PDF' : 'محاكاة'),
         subject: subjectName,
         grade: gradeName,
         url,
@@ -538,17 +608,16 @@ export const supabaseResourceService = {
         partialRow.grade = gradeName;
       }
 
-      const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
-      if (updates.htmlContent !== undefined && updates.htmlContent.trim().length > 0) {
+      if (updates.url !== undefined || updates.fileUrl !== undefined) {
+        partialRow.url = updates.url || updates.fileUrl;
+      } else if (updates.htmlContent !== undefined && updates.htmlContent.trim().length > 0) {
         partialRow.url = 'data:text/html;charset=utf-8,' + encodeURIComponent(updates.htmlContent);
-      } else if (updates.fileUrl !== undefined || (updates as any).url !== undefined) {
-        partialRow.url = updates.fileUrl || (updates as any).url;
-      } else if (effectiveThumb !== undefined && !updates.fileUrl) {
-        partialRow.url = effectiveThumb;
       }
 
-      if ((updates as any).download_url !== undefined && typeof (updates as any).download_url === 'string') {
-        partialRow.download_url = (updates as any).download_url;
+      if (updates.download_url !== undefined && typeof updates.download_url === 'string') {
+        partialRow.download_url = updates.download_url;
+      } else if (partialRow.url && typeof partialRow.url === 'string' && partialRow.url.startsWith('http') && !partialRow.url.startsWith('https://images.unsplash.com')) {
+        partialRow.download_url = partialRow.url;
       }
 
       // Status & published_at columns
@@ -590,6 +659,7 @@ export const supabaseResourceService = {
 
       if (data) {
         const mapped = fromSupabaseRow(data as Record<string, unknown>);
+        const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
         if (effectiveThumb) {
           mapped.thumbnailUrl = effectiveThumb;
           mapped.thumbnail_url = effectiveThumb;

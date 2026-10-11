@@ -26,8 +26,27 @@ export const isResourceInteractive = (
 ): boolean => {
   if (!resource) return false;
 
-  // 1. Direct HTML content presence (camelCase or snake_case)
+  // Strict check: PDF files without embedded HTML are documents, NOT interactive simulations
+  const checkUrl = (resource.fileUrl || resource.file_url || resource.file_path || resource.url || resource.download_url || '').toLowerCase();
+  const checkName = (resource.fileName || '').toLowerCase();
+  const checkType = (resource.fileType || '').toLowerCase();
+  const checkResType = (resource.resourceType || resource.type || '').toLowerCase();
+
+  const isPdf =
+    checkUrl.endsWith('.pdf') ||
+    checkUrl.includes('.pdf?') ||
+    checkName.endsWith('.pdf') ||
+    checkType === '.pdf' ||
+    checkType === 'application/pdf' ||
+    checkResType === 'ملف pdf' ||
+    checkResType === 'pdf';
+
   const directHtml = resource.htmlContent || resource.html_content;
+  if (isPdf && (!directHtml || typeof directHtml !== 'string' || directHtml.trim().length === 0)) {
+    return false;
+  }
+
+  // 1. Direct HTML content presence (camelCase or snake_case)
   if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) {
     return true;
   }
@@ -46,7 +65,7 @@ export const isResourceInteractive = (
     return true;
   }
 
-  // 4. File URLs or Supabase storage paths presence
+  // 4. File URLs or Supabase storage paths presence (HTML/ZIP only)
   const fileUrl = (resource.fileUrl || resource.file_url || resource.file_path || resource.url || resource.download_url || '').toLowerCase();
   if (
     fileUrl.startsWith('data:text/html') ||
@@ -54,7 +73,7 @@ export const isResourceInteractive = (
     fileUrl.endsWith('.htm') ||
     fileUrl.includes('.html?') ||
     fileUrl.includes('.htm?') ||
-    fileUrl.includes('/storage/') ||
+    (fileUrl.includes('/storage/') && (fileUrl.endsWith('.html') || fileUrl.endsWith('.htm') || fileUrl.endsWith('.zip') || fileUrl.includes('.html?') || fileUrl.includes('.htm?'))) ||
     fileUrl.endsWith('.zip')
   ) {
     return true;

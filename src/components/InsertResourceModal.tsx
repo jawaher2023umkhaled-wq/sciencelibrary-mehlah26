@@ -563,7 +563,10 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
 
       } else {
         // Other files like PDF, PPTX, DOCX, MP4, etc.
-        if (ext === '.pdf') setResourceType('ملف PDF');
+        if (ext === '.pdf') {
+          setResourceType('ملف PDF');
+          setHtmlContent('');
+        }
         else if (ext === '.pptx' || ext === '.ppt') setResourceType('عرض تقديمي');
         else if (ext === '.docx' || ext === '.doc') setResourceType('ملف Word');
         else if (ext === '.mp4') setResourceType('فيديو تعليمي');
@@ -595,13 +598,11 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setUploadProgress(0);
         setUploadedFileUrl(undefined);
         setUploadedStoragePath(undefined);
-        setCurrentStep(2);
         setValidationError(`فشل رفع الملف إلى التخزين السحابي: ${uploadRes.error || 'خطأ غير معروف في الرفع'}`);
       }
     } catch (err: unknown) {
       setIsUploading(false);
       setUploadProgress(0);
-      setCurrentStep(2);
       const msg = err instanceof Error ? err.message : String(err);
       setValidationError(`حدث خطأ أثناء معالجة ورفع الملف: ${msg}`);
       console.error(err);
@@ -820,9 +821,24 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     const authorId = (resourceToEdit?.authorId && isValidUuid(resourceToEdit.authorId)) ? resourceToEdit.authorId : user.id;
     const currentUserId = user.id;
 
-    const finalHtml = htmlContent || undefined;
-    const finalFileUrl = finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined);
+    const isPdf =
+      fileType === '.pdf' ||
+      fileName.toLowerCase().endsWith('.pdf') ||
+      (selectedFile && selectedFile.name.toLowerCase().endsWith('.pdf')) ||
+      (uploadedFileUrl && (uploadedFileUrl.toLowerCase().endsWith('.pdf') || uploadedFileUrl.toLowerCase().includes('.pdf?')));
+
+    const finalHtml = isPdf ? undefined : (htmlContent || undefined);
+    const finalFileUrl = isPdf
+      ? (uploadedFileUrl || resourceToEdit?.fileUrl || undefined)
+      : (finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined));
     const effectiveThumb = thumbnailUrl || (resourceToEdit as any)?.thumbnail_url || (resourceToEdit as any)?.image_url || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80';
+
+    const safeFileName = isPdf
+      ? (fileName && fileName.toLowerCase().endsWith('.pdf') ? fileName : (selectedFile?.name || `${safeTitle}.pdf`))
+      : (fileName || `${safeTitle}.html`);
+    const safeFileType = isPdf ? '.pdf' : (fileType || (finalHtml ? '.html' : undefined));
+    const safeResourceType = isPdf && (resourceType === 'محاكاة' || !resourceType) ? 'ملف PDF' : (resourceType || 'محاكاة');
+    const safePreviewType: PreviewType = isPdf ? 'document' : (((finalHtml || (resourceType && (resourceType.includes('محاكاة') || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation'))) || fileType === '.html') ? 'html' : 'document') as PreviewType);
 
     const resourceDataRecord = {
       title: safeTitle,
@@ -841,8 +857,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       unitId: matchedUnit?.id || resourceToEdit?.unitId,
       topic: (topic || '').trim() || safeTitle,
       topicId: matchedTopic?.id || resourceToEdit?.topicId,
-      resourceType: resourceType || 'محاكاة',
-      type: resourceType || 'محاكاة',
+      resourceType: safeResourceType,
+      type: safeResourceType,
       resourceTypeId: matchedType?.id || resourceToEdit?.resourceTypeId,
       category: category || 'تجربة واستقصاء علمي',
       pedagogicalCategory: category || 'تجربة واستقصاء علمي',
@@ -852,9 +868,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       thumbnailUrl: effectiveThumb,
       thumbnail_url: effectiveThumb,
       image_url: effectiveThumb,
-      fileName: fileName || `${safeTitle}.html`,
-      fileSize: fileSize || '1.0 MB',
-      fileType: fileType || (finalHtml ? '.html' : undefined),
+      fileName: safeFileName,
+      fileSize: fileSize || (isPdf ? '1.5 MB' : '1.0 MB'),
+      fileType: safeFileType,
       fileUrl: finalFileUrl,
       file_url: finalFileUrl,
       htmlContent: finalHtml,
@@ -866,7 +882,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       allowPreview: allowPreview ?? true,
       usageContext: usageContext || 'استخدام مخبري وتطبيقي',
       executionTime: executionTime || '45 دقيقة (حصة دراسية)',
-      previewType: ((finalHtml || (resourceType && (resourceType.includes('محاكاة') || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation'))) || fileType === '.html') ? 'html' : 'document') as PreviewType
+      previewType: safePreviewType
     };
 
     if (resourceToEdit) {

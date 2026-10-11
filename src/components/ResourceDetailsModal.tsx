@@ -67,6 +67,18 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
 
   const previewHtml = useMemo(() => {
     if (!resource || typeof resource !== 'object') return null;
+
+    const checkUrl = (resource.fileUrl || resource.file_url || resource.url || resource.download_url || '').toLowerCase();
+    const checkName = (resource.fileName || '').toLowerCase();
+    const isPdf =
+      checkUrl.endsWith('.pdf') ||
+      checkUrl.includes('.pdf?') ||
+      checkName.endsWith('.pdf') ||
+      resource.fileType === '.pdf' ||
+      resource.resourceType === 'ملف PDF';
+
+    if (isPdf) return null;
+
     const directHtml = resource.htmlContent || resource.html_content;
     if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) return directHtml;
 
