@@ -4,6 +4,7 @@ import { useResources } from '../context/ResourceContext';
 import { useAuth } from '../context/AuthContext';
 import { getSimulationContent, generateInteractiveSimulationShell } from '../data/simulations';
 import { ErrorBoundary } from './ErrorBoundary';
+import { PdfViewer } from './PdfViewer';
 import {
   X,
   Play,
@@ -411,58 +412,19 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
 
               {isPdf ? (
                 <div className="space-y-3">
-                  <div className="relative rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 h-[70vh] min-h-[500px] w-full shadow-inner flex flex-col">
-                    {pdfActualUrl ? (
-                      <object
-                        data={pdfActualUrl}
-                        type="application/pdf"
-                        className="w-full h-full flex-1 border-none bg-white"
-                        title={safeTitle}
-                      >
-                        <iframe
-                          src={pdfActualUrl}
-                          title={safeTitle}
-                          className="w-full h-full border-none bg-white"
-                        >
-                          <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-600 space-y-4 bg-slate-50">
-                            <div className="w-16 h-16 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100 shadow-xs">
-                              <FileText className="w-8 h-8" />
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-sm font-bold text-slate-800">تعذر عرض ملف PDF داخل المتصفح مباشرة</p>
-                              <p className="text-xs text-slate-500 max-w-sm">
-                                يمكنك فتح ملف PDF في نافذة جديدة أو تحميله مباشرة لعرض كامل الصفحات والمحتوى بدقة عالية.
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-3 pt-2">
-                              <a
-                                href={pdfActualUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-2 shadow-xs transition-colors"
-                              >
-                                <ExternalLink className="w-4 h-4" />
-                                <span>فتح PDF في نافذة جديدة</span>
-                              </a>
-                              <button
-                                type="button"
-                                onClick={() => downloadResource(resource)}
-                                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer"
-                              >
-                                <Download className="w-4 h-4" />
-                                <span>تحميل الملف</span>
-                              </button>
-                            </div>
-                          </div>
-                        </iframe>
-                      </object>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-full p-6 text-center text-slate-500">
-                        <FileText className="w-12 h-12 text-slate-400 mb-2" />
-                        <p className="text-sm font-bold text-slate-700">رابط ملف PDF غير متوفر حالياً</p>
-                      </div>
-                    )}
-                  </div>
+                  {pdfActualUrl ? (
+                    <PdfViewer
+                      url={pdfActualUrl}
+                      title={safeTitle}
+                      onDownload={() => downloadResource(resource)}
+                      className="h-[70vh] min-h-[500px] w-full"
+                    />
+                  ) : (
+                    <div className="relative rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 h-[70vh] min-h-[500px] w-full shadow-inner flex flex-col items-center justify-center p-6 text-center text-slate-500">
+                      <FileText className="w-12 h-12 text-slate-400 mb-2" />
+                      <p className="text-sm font-bold text-slate-700">رابط ملف PDF غير متوفر حالياً</p>
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-white rounded-xl border border-slate-200 text-xs">
                     <div className="flex items-center gap-2.5 text-slate-700 font-bold min-w-0">
                       <FileText className="w-4 h-4 text-sky-600 shrink-0" />

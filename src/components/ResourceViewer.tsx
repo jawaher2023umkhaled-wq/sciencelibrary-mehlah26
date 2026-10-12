@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ResourceItem, isResourceInteractive, isPdfResource } from '../types';
 import { getSimulationContent, generateInteractiveSimulationShell } from '../data/simulations';
 import { ErrorBoundary } from './ErrorBoundary';
+import { PdfViewer } from './PdfViewer';
 import {
   X,
   Maximize2,
@@ -325,26 +326,36 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
             </div>
           </div>
 
-          {/* Sandboxed Iframe Container */}
-          <div className="flex-1 bg-slate-950 relative overflow-hidden">
-            {/* Loading Indicator */}
-            {isLoading && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-xs text-white">
-                <Loader2 className="w-8 h-8 text-sky-400 animate-spin mb-2" />
-                <p className="text-xs font-semibold text-slate-300">جارٍ تشغيل المحاكاة التفاعلية...</p>
-              </div>
-            )}
+          {/* Sandboxed Container / PDF Viewer */}
+          <div className="flex-1 bg-slate-950 relative overflow-hidden flex flex-col">
+            {isPdf && fileUrl ? (
+              <PdfViewer
+                url={fileUrl}
+                title={safeTitle}
+                onDownload={() => downloadResource(resource)}
+                className="w-full h-full flex-1 rounded-none border-none"
+              />
+            ) : (
+              <>
+                {/* Loading Indicator */}
+                {isLoading && (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-xs text-white">
+                    <Loader2 className="w-8 h-8 text-sky-400 animate-spin mb-2" />
+                    <p className="text-xs font-semibold text-slate-300">جارٍ تشغيل المحاكاة التفاعلية...</p>
+                  </div>
+                )}
 
-            <iframe
-              key={iframeKey}
-              srcDoc={effectiveSrcDoc}
-              src={effectiveSrcDoc ? undefined : effectiveSrc}
-              title={safeTitle}
-              onLoad={() => setIsLoading(false)}
-              className="w-full h-full border-none bg-slate-950"
-              // Security Sandbox allowing scripts, forms, and popups for simulations in isolated opaque origin; omitted for PDFs so native PDF reader can render
-              sandbox={isPdf ? undefined : "allow-scripts allow-forms allow-popups"}
-            />
+                <iframe
+                  key={iframeKey}
+                  srcDoc={effectiveSrcDoc}
+                  src={effectiveSrcDoc ? undefined : effectiveSrc}
+                  title={safeTitle}
+                  onLoad={() => setIsLoading(false)}
+                  className="w-full h-full border-none bg-slate-950"
+                  sandbox="allow-scripts allow-forms allow-popups"
+                />
+              </>
+            )}
           </div>
 
           {/* Sandbox Bottom Safety Notice */}
