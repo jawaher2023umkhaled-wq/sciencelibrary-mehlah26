@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import { useAuth } from '../context/AuthContext';
 import { useResources } from '../context/ResourceContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
-import { ResourceItem, SupportingFile, PreviewType, ResourceStatus } from '../types';
+import { ResourceItem, SupportingFile, PreviewType, ResourceStatus, isPdfResource } from '../types';
 import { uploadResourceFile, deleteResourceFile } from '../services/supabaseStorageService';
 import { generateUuid, isValidUuid } from '../services/supabaseResourceService';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -821,11 +821,14 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     const authorId = (resourceToEdit?.authorId && isValidUuid(resourceToEdit.authorId)) ? resourceToEdit.authorId : user.id;
     const currentUserId = user.id;
 
-    const isPdf =
-      fileType === '.pdf' ||
-      fileName.toLowerCase().endsWith('.pdf') ||
-      (selectedFile && selectedFile.name.toLowerCase().endsWith('.pdf')) ||
-      (uploadedFileUrl && (uploadedFileUrl.toLowerCase().endsWith('.pdf') || uploadedFileUrl.toLowerCase().includes('.pdf?')));
+    const isPdf = isPdfResource({
+      type: resourceType,
+      resourceType,
+      fileType,
+      fileName,
+      title: safeTitle,
+      url: uploadedFileUrl
+    }) || Boolean(selectedFile && selectedFile.name.toLowerCase().endsWith('.pdf'));
 
     const finalHtml = isPdf ? undefined : (htmlContent || undefined);
     const finalFileUrl = isPdf
@@ -834,11 +837,12 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     const effectiveThumb = thumbnailUrl || (resourceToEdit as any)?.thumbnail_url || (resourceToEdit as any)?.image_url || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80';
 
     const safeFileName = isPdf
-      ? (fileName && fileName.toLowerCase().endsWith('.pdf') ? fileName : (selectedFile?.name || `${safeTitle}.pdf`))
+      ? (fileName && fileName.toLowerCase().endsWith('.pdf') ? fileName : (selectedFile?.name || (safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : `${safeTitle}.pdf`)))
       : (fileName || `${safeTitle}.html`);
     const safeFileType = isPdf ? '.pdf' : (fileType || (finalHtml ? '.html' : undefined));
     const safeResourceType = isPdf && (resourceType === 'محاكاة' || !resourceType) ? 'ملف PDF' : (resourceType || 'محاكاة');
     const safePreviewType: PreviewType = isPdf ? 'document' : (((finalHtml || (resourceType && (resourceType.includes('محاكاة') || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation'))) || fileType === '.html') ? 'html' : 'document') as PreviewType);
+    const effectiveCategory = category || (isPdf ? 'مستند وورقة عمل' : 'تجربة واستقصاء علمي');
 
     const resourceDataRecord = {
       title: safeTitle,
@@ -860,8 +864,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       resourceType: safeResourceType,
       type: safeResourceType,
       resourceTypeId: matchedType?.id || resourceToEdit?.resourceTypeId,
-      category: category || 'تجربة واستقصاء علمي',
-      pedagogicalCategory: category || 'تجربة واستقصاء علمي',
+      category: effectiveCategory,
+      pedagogicalCategory: effectiveCategory,
       tags: Array.isArray(tags) ? tags : ['علوم', 'تفاعلي'],
       educationalObjectives: Array.isArray(educationalObjectives) ? educationalObjectives : [],
       scientificConcepts: Array.isArray(scientificConcepts) ? scientificConcepts : [],

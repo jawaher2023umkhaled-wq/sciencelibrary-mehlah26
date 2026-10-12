@@ -10,7 +10,8 @@ import {
   TopicItem,
   GradeItem,
   SubjectItem,
-  AuditLogItem
+  AuditLogItem,
+  isPdfResource
 } from '../types';
 import { storageService } from '../services/storageService';
 import { supabase } from '../services/supabase';
@@ -966,28 +967,24 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     storageService.incrementUsage(resource.id, 'download');
     refreshResources();
 
-    const storageOrHttpUrl = (resource.download_url && resource.download_url.startsWith('http'))
-      ? resource.download_url
-      : (resource.url && resource.url.startsWith('http') && !resource.url.startsWith('https://images.unsplash.com'))
-      ? resource.url
-      : (resource.fileUrl && resource.fileUrl.startsWith('http') && !resource.fileUrl.startsWith('https://images.unsplash.com'))
-      ? resource.fileUrl
-      : undefined;
+    const isPdf = isPdfResource(resource);
 
-    const isPdf = Boolean(
-      (storageOrHttpUrl && (storageOrHttpUrl.toLowerCase().endsWith('.pdf') || storageOrHttpUrl.toLowerCase().includes('.pdf?'))) ||
-      (resource.fileType === '.pdf') ||
-      (resource.fileName && resource.fileName.toLowerCase().endsWith('.pdf')) ||
-      (resource.resourceType && resource.resourceType.toLowerCase().includes('pdf')) ||
-      (resource.type && resource.type.toLowerCase().includes('pdf'))
-    );
+    const storageOrHttpUrl = isPdf
+      ? (resource.download_url || resource.url || resource.fileUrl || resource.file_url)
+      : ((resource.download_url && resource.download_url.startsWith('http'))
+          ? resource.download_url
+          : (resource.url && resource.url.startsWith('http') && !resource.url.startsWith('https://images.unsplash.com'))
+          ? resource.url
+          : (resource.fileUrl && resource.fileUrl.startsWith('http') && !resource.fileUrl.startsWith('https://images.unsplash.com'))
+          ? resource.fileUrl
+          : undefined);
 
     let targetFileName = resource.fileName;
     if (isPdf) {
-      if (!targetFileName || !targetFileName.toLowerCase().endsWith('.pdf')) {
+      if (!targetFileName || !targetFileName.toLowerCase().endsWith('.pdf') || /^_+(\.pdf)?$/i.test(targetFileName) || targetFileName.startsWith('___')) {
         if (storageOrHttpUrl && storageOrHttpUrl.includes('/')) {
           const rawPart = storageOrHttpUrl.split('/').pop()?.split('?')[0];
-          if (rawPart && rawPart.toLowerCase().endsWith('.pdf')) {
+          if (rawPart && rawPart.toLowerCase().endsWith('.pdf') && !/^_+(\.pdf)?$/i.test(rawPart)) {
             try {
               targetFileName = decodeURIComponent(rawPart);
             } catch {
@@ -995,9 +992,11 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
           }
         }
-        if (!targetFileName || !targetFileName.toLowerCase().endsWith('.pdf')) {
-          targetFileName = `${(resource.title || 'document').replace(/\s+/g, '_')}.pdf`;
-        }
+      }
+      if (!targetFileName || !targetFileName.toLowerCase().endsWith('.pdf') || /^_+(\.pdf)?$/i.test(targetFileName) || targetFileName.startsWith('___')) {
+        targetFileName = resource.title?.toLowerCase().endsWith('.pdf')
+          ? resource.title
+          : `${(resource.title || 'document').replace(/\s+/g, '_')}.pdf`;
       }
     } else if (!targetFileName) {
       targetFileName = `${(resource.title || 'resource').replace(/\s+/g, '_')}.html`;

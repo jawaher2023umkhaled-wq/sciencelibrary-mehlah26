@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { ResourceItem, PreviewType, ResourceStatus } from '../types';
+import { ResourceItem, PreviewType, ResourceStatus, isPdfResource } from '../types';
 import { getSimulationContent } from '../data/simulations';
 import { storageService } from './storageService';
 
@@ -85,14 +85,7 @@ export function normalizeSubject(subjectStr?: string | null): { subjectId: strin
 export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
   const id = isValidUuid(item.id) ? item.id : generateUuid();
 
-  const isPdf =
-    (item.fileType === '.pdf') ||
-    (item.fileName && item.fileName.toLowerCase().endsWith('.pdf')) ||
-    (item.url && (item.url.toLowerCase().endsWith('.pdf') || item.url.toLowerCase().includes('.pdf?'))) ||
-    (item.download_url && (item.download_url.toLowerCase().endsWith('.pdf') || item.download_url.toLowerCase().includes('.pdf?'))) ||
-    (item.fileUrl && (item.fileUrl.toLowerCase().endsWith('.pdf') || item.fileUrl.toLowerCase().includes('.pdf?'))) ||
-    (item.resourceType && item.resourceType.toLowerCase().includes('pdf')) ||
-    (item.type && item.type.toLowerCase().includes('pdf'));
+  const isPdf = isPdfResource(item);
 
   const rawHtml = isPdf ? undefined : (item.htmlContent || item.html_content);
   let url = item.url || item.download_url || item.fileUrl || item.file_url || '';
@@ -180,15 +173,13 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   const downloadUrlLower = downloadUrl.toLowerCase();
   const typeLower = type.toLowerCase();
 
-  const isPdf =
-    rawUrlLower.endsWith('.pdf') ||
-    rawUrlLower.includes('.pdf?') ||
-    rawUrlLower.includes('.pdf/') ||
-    downloadUrlLower.endsWith('.pdf') ||
-    downloadUrlLower.includes('.pdf?') ||
-    downloadUrlLower.includes('.pdf/') ||
-    typeLower.includes('pdf') ||
-    typeLower === 'ملف pdf';
+  const isPdf = isPdfResource({
+    url: rawUrl,
+    download_url: downloadUrl,
+    type,
+    title,
+    fileName: String(row.file_name || '')
+  });
 
   // Detect and decode HTML content from database record (NEVER for PDF resources)
   let extractedHtml: string | undefined = undefined;
@@ -237,7 +228,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
 
   let fileUrl: string | undefined = undefined;
   if (isPdf) {
-    fileUrl = rawUrl || downloadUrl;
+    fileUrl = downloadUrl || rawUrl;
   } else if (isRawUrlHtmlOrStorage || (!isRawUrlImage && rawUrl.startsWith('http'))) {
     fileUrl = rawUrl;
   } else if (downloadUrl && downloadUrl.startsWith('http')) {
@@ -249,22 +240,31 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   // Check local cache for fallback metadata if needed
   const existingLocal = typeof window !== 'undefined' ? storageService.getResourceById(id) : undefined;
 
-  let detectedPdfName = `${title}.pdf`;
+  let detectedPdfName = title.toLowerCase().endsWith('.pdf') ? title : `${title}.pdf`;
   const pathSource = rawUrl || downloadUrl;
   if (pathSource && pathSource.includes('/')) {
     const segment = pathSource.split('/').pop()?.split('?')[0];
     if (segment && segment.toLowerCase().endsWith('.pdf')) {
       try {
-        detectedPdfName = decodeURIComponent(segment);
+        const decoded = decodeURIComponent(segment);
+        if (!/^_+(\.pdf)?$/i.test(decoded)) {
+          detectedPdfName = decoded;
+        }
       } catch {
-        detectedPdfName = segment;
+        if (!/^_+(\.pdf)?$/i.test(segment)) {
+          detectedPdfName = segment;
+        }
       }
     }
   }
 
-  const finalFileName = isPdf
+  let finalFileName = isPdf
     ? (existingLocal?.fileName && existingLocal.fileName.toLowerCase().endsWith('.pdf') ? existingLocal.fileName : detectedPdfName)
     : (existingLocal?.fileName || `${title}.html`);
+
+  if (isPdf && (/^_+(\.pdf)?$/i.test(finalFileName) || finalFileName.startsWith('___'))) {
+    finalFileName = title.toLowerCase().endsWith('.pdf') ? title : `${title}.pdf`;
+  }
 
   const finalFileType = isPdf
     ? '.pdf'
@@ -304,16 +304,16 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     thumbnailUrl,
     thumbnail_url: thumbnailUrl,
     image_url: thumbnailUrl,
-    url: rawUrl || downloadUrl || fileUrl,
-    download_url: downloadUrl || rawUrl || fileUrl,
-    fileUrl: fileUrl || (extractedHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}` : undefined),
-    file_url: fileUrl,
+    url: isPdf ? (downloadUrl || rawUrl || fileUrl) : (rawUrl || downloadUrl || fileUrl),
+    download_url: isPdf ? (downloadUrl || rawUrl || fileUrl) : (downloadUrl || rawUrl || fileUrl),
+    fileUrl: isPdf ? (downloadUrl || rawUrl || fileUrl) : (fileUrl || (extractedHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}` : undefined)),
+    file_url: isPdf ? (downloadUrl || rawUrl || fileUrl) : fileUrl,
     htmlContent: isPdf ? undefined : extractedHtml,
     html_content: isPdf ? undefined : extractedHtml,
     fileName: finalFileName,
-    fileType: finalFileType,
-    resourceType: isPdf && (type === 'محاكاة' || !type) ? 'ملف PDF' : type,
-    type: isPdf && (type === 'محاكاة' || !type) ? 'ملف PDF' : type,
+    fileType: isPdf ? '.pdf' : finalFileType,
+    resourceType: isPdf ? 'ملف PDF' : type,
+    type: isPdf ? 'ملف PDF' : type,
     subjectName,
     gradeName,
     gradeId,
@@ -457,14 +457,7 @@ export const supabaseResourceService = {
       const { gradeName } = normalizeGrade(item.gradeName || item.gradeId);
       const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
 
-      const isPdf =
-        (item.fileType === '.pdf') ||
-        (item.fileName && item.fileName.toLowerCase().endsWith('.pdf')) ||
-        (item.url && (item.url.toLowerCase().endsWith('.pdf') || item.url.toLowerCase().includes('.pdf?'))) ||
-        (item.download_url && (item.download_url.toLowerCase().endsWith('.pdf') || item.download_url.toLowerCase().includes('.pdf?'))) ||
-        (item.fileUrl && (item.fileUrl.toLowerCase().endsWith('.pdf') || item.fileUrl.toLowerCase().includes('.pdf?'))) ||
-        (item.resourceType && item.resourceType.toLowerCase().includes('pdf')) ||
-        (item.type && item.type.toLowerCase().includes('pdf'));
+      const isPdf = isPdfResource(item);
 
       const rawHtml = isPdf ? undefined : (item.htmlContent || item.html_content);
       let url = item.url || item.download_url || item.fileUrl || item.file_url || '';

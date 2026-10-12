@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ResourceItem, isResourceInteractive } from '../types';
+import { ResourceItem, isResourceInteractive, isPdfResource } from '../types';
 import { getSimulationContent, generateInteractiveSimulationShell } from '../data/simulations';
 import { ErrorBoundary } from './ErrorBoundary';
 import {
@@ -40,20 +40,10 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [fetchedHtml, setFetchedHtml] = useState<string | null>(null);
 
-  // Check if resource is an interactive HTML simulation safely (unconditional Hook call)
-  const isInteractive = useMemo(() => Boolean(resource && typeof resource === 'object' && isResourceInteractive(resource)), [resource]);
+  const isPdf = useMemo(() => Boolean(resource && isPdfResource(resource)), [resource]);
 
-  const isPdf = useMemo(() => Boolean(
-    resource && (
-      (resource.fileType === '.pdf') ||
-      (resource.fileName && resource.fileName.toLowerCase().endsWith('.pdf')) ||
-      (resource.url && (resource.url.toLowerCase().endsWith('.pdf') || resource.url.toLowerCase().includes('.pdf?'))) ||
-      (resource.download_url && (resource.download_url.toLowerCase().endsWith('.pdf') || resource.download_url.toLowerCase().includes('.pdf?'))) ||
-      (resource.fileUrl && (resource.fileUrl.toLowerCase().endsWith('.pdf') || resource.fileUrl.toLowerCase().includes('.pdf?'))) ||
-      (resource.resourceType && resource.resourceType.toLowerCase().includes('pdf')) ||
-      (resource.type && resource.type.toLowerCase().includes('pdf'))
-    )
-  ), [resource]);
+  // Check if resource is an interactive HTML simulation safely (unconditional Hook call)
+  const isInteractive = useMemo(() => Boolean(resource && !isPdf && typeof resource === 'object' && isResourceInteractive(resource)), [resource, isPdf]);
 
   // Resolve HTML code from all possible sources (unconditional Hook call):
   // 1. Direct htmlContent or html_content property
@@ -198,7 +188,7 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     }
   };
 
-  // Determine effective HTML content for srcDoc (for simulations/HTML only)
+  // Determine effective HTML content for srcDoc (for simulations/HTML only, NEVER for PDFs)
   const resolvedHtmlContent = !isPdf
     ? (resource?.htmlContent || resource?.html_content || fetchedHtml || (resource ? getSimulationContent(resource) : null))
     : null;
@@ -218,7 +208,7 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     effectiveSrcDoc = resolvedHtmlContent;
   } else if (isStorageOrHtmlUrl) {
     effectiveSrc = fileUrl;
-  } else if (isInteractive || resource?.type === 'simulation' || (resource?.resourceType || '').toLowerCase().includes('simulation') || (resource?.resourceType || '').includes('محاكاة') || (resource?.resourceType || '').includes('تفاعلي')) {
+  } else if (!isPdf && (isInteractive || resource?.type === 'simulation' || (resource?.resourceType || '').toLowerCase().includes('simulation') || (resource?.resourceType || '').includes('محاكاة') || (resource?.resourceType || '').includes('تفاعلي'))) {
     effectiveSrcDoc = generateInteractiveSimulationShell(resource);
   } else {
     effectiveSrc = fileUrl;

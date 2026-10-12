@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ResourceItem, isAdminRole, isResourceInteractive } from '../types';
+import { ResourceItem, isAdminRole, isResourceInteractive, isPdfResource } from '../types';
 import { useResources } from '../context/ResourceContext';
 import { useAuth } from '../context/AuthContext';
 import { getSimulationContent, generateInteractiveSimulationShell } from '../data/simulations';
@@ -29,7 +29,8 @@ import {
   Video,
   Image as ImageIcon,
   FileCode,
-  Compass
+  Compass,
+  ExternalLink
 } from 'lucide-react';
 
 interface ResourceDetailsModalProps {
@@ -63,21 +64,15 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
   const [showVersions, setShowVersions] = useState(false);
   const [showReviews, setShowReviews] = useState(false);
 
-  const isInteractive = useMemo(() => Boolean(resource && isResourceInteractive(resource)), [resource]);
+  const isPdf = useMemo(() => Boolean(resource && isPdfResource(resource)), [resource]);
+  const isInteractive = useMemo(() => Boolean(resource && !isPdf && isResourceInteractive(resource)), [resource, isPdf]);
+  const pdfActualUrl = useMemo(() => {
+    if (!resource || !isPdf) return '';
+    return resource.download_url || resource.url || resource.fileUrl || resource.file_url || '';
+  }, [resource, isPdf]);
 
   const previewHtml = useMemo(() => {
-    if (!resource || typeof resource !== 'object') return null;
-
-    const checkUrl = (resource.fileUrl || resource.file_url || resource.url || resource.download_url || '').toLowerCase();
-    const checkName = (resource.fileName || '').toLowerCase();
-    const isPdf =
-      checkUrl.endsWith('.pdf') ||
-      checkUrl.includes('.pdf?') ||
-      checkName.endsWith('.pdf') ||
-      resource.fileType === '.pdf' ||
-      resource.resourceType === 'ملف PDF';
-
-    if (isPdf) return null;
+    if (!resource || typeof resource !== 'object' || isPdf) return null;
 
     const directHtml = resource.htmlContent || resource.html_content;
     if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) return directHtml;
@@ -112,7 +107,7 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
       return generateInteractiveSimulationShell(resource);
     }
     return null;
-  }, [resource, isInteractive]);
+  }, [resource, isInteractive, isPdf]);
 
   // Safe early exit if modal is not open, AFTER all hooks have executed
   if (!isOpen) {
@@ -345,7 +340,17 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
 
                 {/* Action Buttons Row */}
                 <div className="flex flex-wrap items-center gap-2.5">
-                  {isInteractive ? (
+                  {isPdf ? (
+                    <a
+                      href={pdfActualUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 min-w-[140px] py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      <span>فتح مستند PDF</span>
+                    </a>
+                  ) : isInteractive ? (
                     <button
                       onClick={() => {
                         onClose();
@@ -404,7 +409,90 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
                 <span>معاينة المحتوى التعليمي للمورد</span>
               </h4>
 
-              {isInteractive ? (
+              {isPdf ? (
+                <div className="space-y-3">
+                  <div className="relative rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 h-[70vh] min-h-[500px] w-full shadow-inner flex flex-col">
+                    {pdfActualUrl ? (
+                      <object
+                        data={pdfActualUrl}
+                        type="application/pdf"
+                        className="w-full h-full flex-1 border-none bg-white"
+                        title={safeTitle}
+                      >
+                        <iframe
+                          src={pdfActualUrl}
+                          title={safeTitle}
+                          className="w-full h-full border-none bg-white"
+                        >
+                          <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-600 space-y-4 bg-slate-50">
+                            <div className="w-16 h-16 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100 shadow-xs">
+                              <FileText className="w-8 h-8" />
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-sm font-bold text-slate-800">تعذر عرض ملف PDF داخل المتصفح مباشرة</p>
+                              <p className="text-xs text-slate-500 max-w-sm">
+                                يمكنك فتح ملف PDF في نافذة جديدة أو تحميله مباشرة لعرض كامل الصفحات والمحتوى بدقة عالية.
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-3 pt-2">
+                              <a
+                                href={pdfActualUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-2 shadow-xs transition-colors"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                                <span>فتح PDF في نافذة جديدة</span>
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => downloadResource(resource)}
+                                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer"
+                              >
+                                <Download className="w-4 h-4" />
+                                <span>تحميل الملف</span>
+                              </button>
+                            </div>
+                          </div>
+                        </iframe>
+                      </object>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full p-6 text-center text-slate-500">
+                        <FileText className="w-12 h-12 text-slate-400 mb-2" />
+                        <p className="text-sm font-bold text-slate-700">رابط ملف PDF غير متوفر حالياً</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-white rounded-xl border border-slate-200 text-xs">
+                    <div className="flex items-center gap-2.5 text-slate-700 font-bold min-w-0">
+                      <FileText className="w-4 h-4 text-sky-600 shrink-0" />
+                      <span className="truncate max-w-xs">{resource?.fileName || safeTitle}</span>
+                      <span className="text-[11px] text-slate-400 font-normal shrink-0">(مستند PDF تعليمي معتمد)</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {pdfActualUrl && (
+                        <a
+                          href={pdfActualUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>فتح PDF في نافذة جديدة</span>
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => downloadResource(resource)}
+                        className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>تحميل ملف PDF</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : isInteractive ? (
                 <div className="space-y-3">
                   <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 h-72 sm:h-84 shadow-inner">
                     <iframe

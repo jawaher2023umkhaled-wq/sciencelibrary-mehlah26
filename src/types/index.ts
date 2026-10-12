@@ -12,7 +12,63 @@ export const getRoleArabicLabel = (role?: UserRole | null): string => {
 
 /**
  * Universal helper to determine if a resource is an interactive HTML simulation,
+/**
+ * Determines whether a resource is a PDF document based on URL, file name,
+ * title, file extension, mime type, or resource type indicator.
+ */
+export const isPdfResource = (
+  resource?: {
+    type?: string;
+    resourceType?: string;
+    file_type?: string;
+    fileType?: string;
+    file_name?: string;
+    fileName?: string;
+    title?: string;
+    url?: string;
+    download_url?: string;
+    fileUrl?: string;
+    file_url?: string;
+    file_path?: string;
+  } | null
+): boolean => {
+  if (!resource || typeof resource !== 'object') return false;
+
+  const urlStr = String(
+    resource.download_url ||
+    resource.url ||
+    resource.fileUrl ||
+    resource.file_url ||
+    resource.file_path ||
+    ''
+  ).toLowerCase();
+
+  const nameStr = String(resource.fileName || resource.file_name || '').toLowerCase();
+  const titleStr = String(resource.title || '').toLowerCase();
+  const fileTypeStr = String(resource.fileType || resource.file_type || '').toLowerCase();
+  const resTypeStr = String(resource.resourceType || resource.type || '').toLowerCase();
+
+  return (
+    urlStr.endsWith('.pdf') ||
+    urlStr.includes('.pdf?') ||
+    urlStr.includes('.pdf/') ||
+    nameStr.endsWith('.pdf') ||
+    titleStr.endsWith('.pdf') ||
+    titleStr.includes('.pdf') ||
+    fileTypeStr === '.pdf' ||
+    fileTypeStr === 'pdf' ||
+    fileTypeStr === 'application/pdf' ||
+    resTypeStr.includes('pdf') ||
+    resTypeStr.includes('ملف pdf') ||
+    resTypeStr.includes('مستند pdf') ||
+    resTypeStr.includes('ورقة عمل pdf')
+  );
+};
+
+/**
+ * Determines whether a resource is an interactive HTML simulation,
  * experiment, or web package requiring sandbox iframe execution.
+ * PDF documents are strictly non-interactive documents.
  */
 export const isResourceInteractive = (
   resource?: (ResourceItem & {
@@ -26,25 +82,12 @@ export const isResourceInteractive = (
 ): boolean => {
   if (!resource) return false;
 
-  // Strict check: PDF files without embedded HTML are documents, NOT interactive simulations
-  const checkUrl = (resource.fileUrl || resource.file_url || resource.file_path || resource.url || resource.download_url || '').toLowerCase();
-  const checkName = (resource.fileName || '').toLowerCase();
-  const checkType = (resource.fileType || '').toLowerCase();
-  const checkResType = (resource.resourceType || resource.type || '').toLowerCase();
-
-  const isPdf =
-    checkUrl.endsWith('.pdf') ||
-    checkUrl.includes('.pdf?') ||
-    checkName.endsWith('.pdf') ||
-    checkType === '.pdf' ||
-    checkType === 'application/pdf' ||
-    checkResType === 'ملف pdf' ||
-    checkResType === 'pdf';
-
-  const directHtml = resource.htmlContent || resource.html_content;
-  if (isPdf && (!directHtml || typeof directHtml !== 'string' || directHtml.trim().length === 0)) {
+  // Strict rule: Any resource whose actual file is a PDF is a document, NEVER an interactive simulation
+  if (isPdfResource(resource)) {
     return false;
   }
+
+  const directHtml = resource.htmlContent || resource.html_content;
 
   // 1. Direct HTML content presence (camelCase or snake_case)
   if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) {

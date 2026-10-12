@@ -112,7 +112,11 @@ export async function uploadResourceFile(
       };
     }
 
-    const cleanFileName = baseName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '') || 'resource_file';
+    let cleanFileName = baseName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '') || 'resource_file';
+    const ext = baseName.includes('.') ? '.' + baseName.split('.').pop()?.toLowerCase() : '';
+    if (ext && /^_+$/.test(cleanFileName.replace(new RegExp(`\\${ext}$`), ''))) {
+      cleanFileName = `document_${Date.now()}${ext}`;
+    }
 
     // 4. Construct approved storage path: {userId}/{resourceId}/{cleanFileName}
     const storagePath = `${effectiveUserId}/${cleanResourceId}/${cleanFileName}`;
