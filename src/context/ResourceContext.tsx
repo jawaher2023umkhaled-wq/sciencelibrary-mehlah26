@@ -122,6 +122,13 @@ const DEFAULT_FILTERS: LibraryFilterState = {
   sortBy: 'newest'
 };
 
+let lastCreateErrorHolder: string | null = null;
+
+/**
+ * Returns the most recent error message encountered during resource creation in Supabase.
+ */
+export const getLastCreateError = (): string | null => lastCreateErrorHolder;
+
 const ResourceContext = createContext<ResourceContextType | undefined>(undefined);
 
 export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -396,6 +403,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const { data: savedRecord, savedToSupabase, error } = await supabaseResourceService.createResource(preparedResource);
 
     if (savedToSupabase && savedRecord) {
+      lastCreateErrorHolder = null;
       // ONLY update UI React state AFTER confirmed database response
       setResources(prev => [savedRecord, ...prev.filter(r => r.id !== savedRecord.id)]);
       setIsSupabaseLive(true);
@@ -442,6 +450,7 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setResources(prev => prev.filter(r => r.id !== newId));
       storageService.deleteResource(newId);
       const actionableError = error || 'تعذر حفظ المورد في Supabase.';
+      lastCreateErrorHolder = actionableError;
       showToast(`فشل حفظ المورد في Supabase: ${actionableError}`, 'error');
       return null;
     }

@@ -487,11 +487,12 @@ export const supabaseResourceService = {
       const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
 
       const isPdf = isPdfResource(item);
+      const isPptx = isPptxResource(item);
 
-      const rawHtml = isPdf ? undefined : (item.htmlContent || item.html_content);
+      const rawHtml = (isPdf || isPptx) ? undefined : (item.htmlContent || item.html_content);
       let url = item.url || item.download_url || item.fileUrl || item.file_url || '';
 
-      if (!isPdf) {
+      if (!isPdf && !isPptx) {
         if (rawHtml && rawHtml.trim().length > 0) {
           if (!url || url.startsWith('https://images.unsplash.com') || url.startsWith('data:image') || !url.startsWith('http')) {
             url = 'data:text/html;charset=utf-8,' + encodeURIComponent(rawHtml);
@@ -526,7 +527,7 @@ export const supabaseResourceService = {
         id,
         title: item.title || 'مورد تعليمي بدون عنوان',
         description: item.description || '',
-        type: item.resourceType || item.type || (isPdf ? 'ملف PDF' : 'محاكاة'),
+        type: item.resourceType || item.type || (isPdf ? 'ملف PDF' : isPptx ? 'عرض تقديمي' : 'محاكاة'),
         subject: subjectName,
         grade: gradeName,
         url,

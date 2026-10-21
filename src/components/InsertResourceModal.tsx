@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useId } from 'react';
 import JSZip from 'jszip';
 import { useAuth } from '../context/AuthContext';
-import { useResources } from '../context/ResourceContext';
+import { useResources, getLastCreateError } from '../context/ResourceContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
-import { ResourceItem, SupportingFile, PreviewType, ResourceStatus, isPdfResource } from '../types';
+import { ResourceItem, SupportingFile, PreviewType, ResourceStatus, isPdfResource, isPptxResource } from '../types';
 import { uploadResourceFile, deleteResourceFile } from '../services/supabaseStorageService';
 import { generateUuid, isValidUuid } from '../services/supabaseResourceService';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -146,6 +146,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   const [resourceId, setResourceId] = useState<string>(() => generateUuid());
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | undefined>(undefined);
   const [uploadedStoragePath, setUploadedStoragePath] = useState<string | undefined>(undefined);
+  const [isNewlyUploadedFile, setIsNewlyUploadedFile] = useState<boolean>(false);
   const [thumbnailUrl, setThumbnailUrl] = useState('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState('');
@@ -238,6 +239,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setFileSize(resourceToEdit.fileSize || '');
         setFileType(resourceToEdit.fileType || '');
         setSelectedFile(null);
+        setIsNewlyUploadedFile(false);
         setSupportingFiles(Array.isArray(resourceToEdit.supportingFiles) ? resourceToEdit.supportingFiles.filter(Boolean) : []);
         setVersion(resourceToEdit.version || 'الإصدار 1.0');
         setUsageRights(resourceToEdit.usageRights || 'جميع الحقوق محفوظة لمدرسة محلاح للبنات (5–12)');
@@ -255,6 +257,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setResourceId(generateUuid());
         setUploadedFileUrl(undefined);
         setUploadedStoragePath(undefined);
+        setIsNewlyUploadedFile(false);
         setTitle('');
         setAuthor(user?.displayName || '');
         setDescription('');
@@ -567,7 +570,10 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
           setResourceType('ملف PDF');
           setHtmlContent('');
         }
-        else if (ext === '.pptx' || ext === '.ppt') setResourceType('عرض تقديمي');
+        else if (ext === '.pptx' || ext === '.ppt') {
+          setResourceType('عرض تقديمي');
+          setHtmlContent('');
+        }
         else if (ext === '.docx' || ext === '.doc') setResourceType('ملف Word');
         else if (ext === '.mp4') setResourceType('فيديو تعليمي');
         else if (ext === '.png' || ext === '.jpg' || ext === '.jpeg') setResourceType('صورة تعليمية');
@@ -589,6 +595,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       if (uploadRes.success && uploadRes.publicUrl) {
         setUploadedFileUrl(uploadRes.publicUrl);
         setUploadedStoragePath(uploadRes.storagePath);
+        setIsNewlyUploadedFile(true);
         setUploadProgress(100);
         setIsUploading(false);
         setCurrentStep(2);
@@ -598,6 +605,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setUploadProgress(0);
         setUploadedFileUrl(undefined);
         setUploadedStoragePath(undefined);
+        setIsNewlyUploadedFile(false);
         setValidationError(`فشل رفع الملف إلى التخزين السحابي: ${uploadRes.error || 'خطأ غير معروف في الرفع'}`);
       }
     } catch (err: unknown) {
@@ -830,19 +838,34 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       url: uploadedFileUrl
     }) || Boolean(selectedFile && selectedFile.name.toLowerCase().endsWith('.pdf'));
 
-    const finalHtml = isPdf ? undefined : (htmlContent || undefined);
-    const finalFileUrl = isPdf
+    const isPptx = isPptxResource({
+      type: resourceType,
+      resourceType,
+      fileType,
+      fileName,
+      title: safeTitle,
+      url: uploadedFileUrl
+    }) || Boolean(selectedFile && (selectedFile.name.toLowerCase().endsWith('.pptx') || selectedFile.name.toLowerCase().endsWith('.ppt')));
+
+    const finalHtml = (isPdf || isPptx) ? undefined : (htmlContent || undefined);
+    const finalFileUrl = (isPdf || isPptx)
       ? (uploadedFileUrl || resourceToEdit?.fileUrl || undefined)
       : (finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined));
     const effectiveThumb = thumbnailUrl || (resourceToEdit as any)?.thumbnail_url || (resourceToEdit as any)?.image_url || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80';
 
     const safeFileName = isPdf
       ? (fileName && fileName.toLowerCase().endsWith('.pdf') ? fileName : (selectedFile?.name || (safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : `${safeTitle}.pdf`)))
+      : isPptx
+      ? (fileName && (fileName.toLowerCase().endsWith('.pptx') || fileName.toLowerCase().endsWith('.ppt')) ? fileName : (selectedFile?.name || (safeTitle.toLowerCase().endsWith('.pptx') || safeTitle.toLowerCase().endsWith('.ppt') ? safeTitle : `${safeTitle}.pptx`)))
       : (fileName || `${safeTitle}.html`);
-    const safeFileType = isPdf ? '.pdf' : (fileType || (finalHtml ? '.html' : undefined));
-    const safeResourceType = isPdf && (resourceType === 'محاكاة' || !resourceType) ? 'ملف PDF' : (resourceType || 'محاكاة');
-    const safePreviewType: PreviewType = isPdf ? 'document' : (((finalHtml || (resourceType && (resourceType.includes('محاكاة') || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation'))) || fileType === '.html') ? 'html' : 'document') as PreviewType);
-    const effectiveCategory = category || (isPdf ? 'مستند وورقة عمل' : 'تجربة واستقصاء علمي');
+    const safeFileType = isPdf ? '.pdf' : isPptx ? (safeFileName.toLowerCase().endsWith('.ppt') ? '.ppt' : '.pptx') : (fileType || (finalHtml ? '.html' : undefined));
+    const safeResourceType = isPdf && (resourceType === 'محاكاة' || !resourceType)
+      ? 'ملف PDF'
+      : isPptx && (resourceType === 'محاكاة' || !resourceType)
+      ? 'عرض تقديمي'
+      : (resourceType || 'محاكاة');
+    const safePreviewType: PreviewType = isPdf ? 'document' : isPptx ? 'presentation' : (((finalHtml || (resourceType && (resourceType.includes('محاكاة') || resourceType.includes('تفاعلي') || resourceType.toLowerCase().includes('simulation'))) || fileType === '.html') ? 'html' : 'document') as PreviewType);
+    const effectiveCategory = category || (isPdf ? 'مستند وورقة عمل' : isPptx ? 'عرض تقديمي وتوضيح مرئي' : 'تجربة واستقصاء علمي');
 
     const resourceDataRecord = {
       title: safeTitle,
@@ -877,6 +900,8 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       fileType: safeFileType,
       fileUrl: finalFileUrl,
       file_url: finalFileUrl,
+      url: finalFileUrl,
+      download_url: (isPdf || isPptx) ? finalFileUrl : undefined,
       htmlContent: finalHtml,
       html_content: finalHtml,
       supportingFiles: Array.isArray(supportingFiles) ? supportingFiles : [],
@@ -1006,15 +1031,21 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         });
 
         if (saved) {
+          setIsNewlyUploadedFile(false);
           onClose();
         } else {
           // Database failure after Storage upload attempts to delete the uploaded object (Rollback)
-          if (finalStoragePath) {
+          // ONLY delete if this is a newly uploaded file in this session, avoiding accidental deletion of existing or in-use files
+          if (isNewlyUploadedFile && finalStoragePath && finalStoragePath !== (resourceToEdit as any)?.file_path) {
             await deleteResourceFile(finalStoragePath).catch((cleanupErr) => {
               console.warn('Rollback delete failed:', cleanupErr);
             });
           }
-          setValidationError('تعذر حفظ المورد في قاعدة البيانات Supabase. يرجى مراجعة الصلاحيات أو التأكد من تسجيل الدخول كمدير معتمد.');
+          const realError = getLastCreateError();
+          const detailedMsg = realError
+            ? `فشل حفظ المورد في قاعدة البيانات: ${realError}`
+            : 'تعذر حفظ المورد في قاعدة البيانات Supabase. يرجى التحقق من صلاحيات الحساب أو قيود الأمان (RLS).';
+          setValidationError(detailedMsg);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
