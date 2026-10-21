@@ -148,7 +148,7 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     }
 
     setIsLoading(false);
-  }, [resource, isOpen, isPdf]);
+  }, [resource, isOpen, isPdf, isPptx]);
 
   // If not open, safely return null AFTER all hooks have executed
   if (!isOpen) {
@@ -197,6 +197,27 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     : null;
 
   const fileUrl = resource?.download_url || resource?.url || resource?.fileUrl || resource?.file_url || '';
+  const pptxActualUrl = useMemo(() => {
+    if (!resource || !isPptx) return '';
+    const candidates = [
+      resource.download_url,
+      resource.fileUrl,
+      resource.file_url,
+      resource.url
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim().length > 0) {
+        const clean = c.trim();
+        if (clean.startsWith('data:text/html') || clean.startsWith('<!DOCTYPE') || clean.startsWith('<html')) {
+          continue;
+        }
+        if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('/')) {
+          return clean;
+        }
+      }
+    }
+    return '';
+  }, [resource, isPptx]);
   const isImage = fileUrl.startsWith('https://images.unsplash.com') || /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(fileUrl);
   const isStorageOrHtmlUrl = !isPdf && !isPptx && (fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('/')) && !isImage && (fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm'));
 
@@ -337,13 +358,33 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
                 onDownload={() => downloadResource(resource)}
                 className="w-full h-full flex-1 rounded-none border-none"
               />
-            ) : isPptx && fileUrl ? (
+            ) : isPptx && pptxActualUrl ? (
               <PptxViewer
-                url={fileUrl}
+                url={pptxActualUrl}
                 title={safeTitle}
                 onDownload={() => downloadResource(resource)}
                 className="w-full h-full flex-1 rounded-none border-none"
               />
+            ) : isPptx ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-slate-950 text-white">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-3">
+                  <ExternalLink className="w-7 h-7" />
+                </div>
+                <h3 className="text-base font-bold text-slate-100 mb-2">رابط ملف PowerPoint غير متوفر</h3>
+                <p className="text-xs text-slate-400 max-w-md mb-6 leading-relaxed">
+                  لم يتم العثور على رابط تخزين سحابي صالح لملف العرض التقديمي. يرجى التحقق من حفظ المورد.
+                </p>
+                {resource?.allowDownload !== false && (
+                  <button
+                    type="button"
+                    onClick={() => downloadResource(resource)}
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-2 shadow-md cursor-pointer transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>تنزيل المورد</span>
+                  </button>
+                )}
+              </div>
             ) : (
               <>
                 {/* Loading Indicator */}

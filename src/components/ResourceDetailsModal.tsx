@@ -76,7 +76,24 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
   }, [resource, isPdf]);
   const pptxActualUrl = useMemo(() => {
     if (!resource || !isPptx) return '';
-    return resource.download_url || resource.url || resource.fileUrl || resource.file_url || '';
+    const candidates = [
+      resource.download_url,
+      resource.fileUrl,
+      resource.file_url,
+      resource.url
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim().length > 0) {
+        const clean = c.trim();
+        if (clean.startsWith('data:text/html') || clean.startsWith('<!DOCTYPE') || clean.startsWith('<html')) {
+          continue;
+        }
+        if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('/')) {
+          return clean;
+        }
+      }
+    }
+    return '';
   }, [resource, isPptx]);
 
   const previewHtml = useMemo(() => {
