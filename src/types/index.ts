@@ -66,9 +66,76 @@ export const isPdfResource = (
 };
 
 /**
+ * Determines whether a resource is a PowerPoint presentation (.pptx or .ppt)
+ * based on URL, file name, title, file extension, mime type, or resource type indicator.
+ */
+export const isPptxResource = (
+  resource?: {
+    type?: string;
+    resourceType?: string;
+    file_type?: string;
+    fileType?: string;
+    file_name?: string;
+    fileName?: string;
+    title?: string;
+    url?: string;
+    download_url?: string;
+    fileUrl?: string;
+    file_url?: string;
+    file_path?: string;
+    previewType?: string;
+  } | null
+): boolean => {
+  if (!resource || typeof resource !== 'object') return false;
+
+  const urlStr = String(
+    resource.download_url ||
+    resource.url ||
+    resource.fileUrl ||
+    resource.file_url ||
+    resource.file_path ||
+    ''
+  ).toLowerCase();
+
+  const nameStr = String(resource.fileName || resource.file_name || '').toLowerCase();
+  const titleStr = String(resource.title || '').toLowerCase();
+  const fileTypeStr = String(resource.fileType || resource.file_type || '').toLowerCase();
+  const resTypeStr = String(resource.resourceType || resource.type || '').toLowerCase();
+  const previewTypeStr = String(resource.previewType || '').toLowerCase();
+
+  return (
+    urlStr.endsWith('.pptx') ||
+    urlStr.endsWith('.ppt') ||
+    urlStr.includes('.pptx?') ||
+    urlStr.includes('.ppt?') ||
+    urlStr.includes('.pptx/') ||
+    urlStr.includes('.ppt/') ||
+    nameStr.endsWith('.pptx') ||
+    nameStr.endsWith('.ppt') ||
+    titleStr.endsWith('.pptx') ||
+    titleStr.endsWith('.ppt') ||
+    titleStr.includes('.pptx') ||
+    titleStr.includes('.ppt') ||
+    fileTypeStr === '.pptx' ||
+    fileTypeStr === 'pptx' ||
+    fileTypeStr === '.ppt' ||
+    fileTypeStr === 'ppt' ||
+    fileTypeStr === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+    fileTypeStr === 'application/vnd.ms-powerpoint' ||
+    resTypeStr.includes('عرض تقديمي') ||
+    resTypeStr.includes('بوربوينت') ||
+    resTypeStr.includes('بور بوينت') ||
+    resTypeStr.includes('powerpoint') ||
+    resTypeStr.includes('pptx') ||
+    resTypeStr.includes('ppt') ||
+    previewTypeStr === 'presentation'
+  );
+};
+
+/**
  * Determines whether a resource is an interactive HTML simulation,
  * experiment, or web package requiring sandbox iframe execution.
- * PDF documents are strictly non-interactive documents.
+ * PDF documents and PowerPoint presentations are strictly non-interactive documents.
  */
 export const isResourceInteractive = (
   resource?: (ResourceItem & {
@@ -82,8 +149,8 @@ export const isResourceInteractive = (
 ): boolean => {
   if (!resource) return false;
 
-  // Strict rule: Any resource whose actual file is a PDF is a document, NEVER an interactive simulation
-  if (isPdfResource(resource)) {
+  // Strict rule: Any resource whose actual file is a PDF or PPTX is a document/presentation, NEVER an interactive simulation
+  if (isPdfResource(resource) || isPptxResource(resource)) {
     return false;
   }
 

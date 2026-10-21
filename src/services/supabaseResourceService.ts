@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { ResourceItem, PreviewType, ResourceStatus, isPdfResource } from '../types';
+import { ResourceItem, PreviewType, ResourceStatus, isPdfResource, isPptxResource } from '../types';
 import { getSimulationContent } from '../data/simulations';
 import { storageService } from './storageService';
 
@@ -181,10 +181,18 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     fileName: String(row.file_name || '')
   });
 
-  // Detect and decode HTML content from database record (NEVER for PDF resources)
+  const isPptx = isPptxResource({
+    url: rawUrl,
+    download_url: downloadUrl,
+    type,
+    title,
+    fileName: String(row.file_name || '')
+  });
+
+  // Detect and decode HTML content from database record (NEVER for PDF or PPTX resources)
   let extractedHtml: string | undefined = undefined;
 
-  if (!isPdf) {
+  if (!isPdf && !isPptx) {
     if (rawHtmlField && rawHtmlField.trim().length > 0) {
       extractedHtml = rawHtmlField;
     } else if (rawUrl.startsWith('data:text/html;charset=utf-8,')) {
@@ -207,7 +215,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
       extractedHtml = rawUrl;
     }
 
-    // If HTML is still not extracted and NOT an external URL or PDF, check built-in simulation repository
+    // If HTML is still not extracted and NOT an external URL, PDF, or PPTX, check built-in simulation repository
     if (!extractedHtml && !rawUrl.startsWith('http')) {
       const builtinSim = getSimulationContent({ title, description, topic: title, resourceType: type, type });
       if (builtinSim) {
@@ -219,7 +227,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   const isRawUrlImage = rawUrl.startsWith('https://images.unsplash.com') ||
                         /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(rawUrl);
 
-  const isRawUrlHtmlOrStorage = !isPdf && (
+  const isRawUrlHtmlOrStorage = !isPdf && !isPptx && (
     rawUrl.toLowerCase().includes('.html') ||
     rawUrl.toLowerCase().includes('.htm') ||
     (rawUrl.includes('/storage/') && (rawUrl.endsWith('.html') || rawUrl.endsWith('.htm') || rawUrl.endsWith('.zip'))) ||
@@ -227,7 +235,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   );
 
   let fileUrl: string | undefined = undefined;
-  if (isPdf) {
+  if (isPdf || isPptx) {
     fileUrl = downloadUrl || rawUrl;
   } else if (isRawUrlHtmlOrStorage || (!isRawUrlImage && rawUrl.startsWith('http'))) {
     fileUrl = rawUrl;
@@ -241,18 +249,32 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   const existingLocal = typeof window !== 'undefined' ? storageService.getResourceById(id) : undefined;
 
   let detectedPdfName = title.toLowerCase().endsWith('.pdf') ? title : `${title}.pdf`;
+  let detectedPptxName = (title.toLowerCase().endsWith('.pptx') || title.toLowerCase().endsWith('.ppt')) ? title : `${title}.pptx`;
   const pathSource = rawUrl || downloadUrl;
   if (pathSource && pathSource.includes('/')) {
     const segment = pathSource.split('/').pop()?.split('?')[0];
-    if (segment && segment.toLowerCase().endsWith('.pdf')) {
-      try {
-        const decoded = decodeURIComponent(segment);
-        if (!/^_+(\.pdf)?$/i.test(decoded)) {
-          detectedPdfName = decoded;
+    if (segment) {
+      if (segment.toLowerCase().endsWith('.pdf')) {
+        try {
+          const decoded = decodeURIComponent(segment);
+          if (!/^_+(\.pdf)?$/i.test(decoded)) {
+            detectedPdfName = decoded;
+          }
+        } catch {
+          if (!/^_+(\.pdf)?$/i.test(segment)) {
+            detectedPdfName = segment;
+          }
         }
-      } catch {
-        if (!/^_+(\.pdf)?$/i.test(segment)) {
-          detectedPdfName = segment;
+      } else if (segment.toLowerCase().endsWith('.pptx') || segment.toLowerCase().endsWith('.ppt')) {
+        try {
+          const decoded = decodeURIComponent(segment);
+          if (!/^_+(\.pptx|\.ppt)?$/i.test(decoded)) {
+            detectedPptxName = decoded;
+          }
+        } catch {
+          if (!/^_+(\.pptx|\.ppt)?$/i.test(segment)) {
+            detectedPptxName = segment;
+          }
         }
       }
     }
@@ -260,17 +282,24 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
 
   let finalFileName = isPdf
     ? (existingLocal?.fileName && existingLocal.fileName.toLowerCase().endsWith('.pdf') ? existingLocal.fileName : detectedPdfName)
+    : isPptx
+    ? (existingLocal?.fileName && (existingLocal.fileName.toLowerCase().endsWith('.pptx') || existingLocal.fileName.toLowerCase().endsWith('.ppt')) ? existingLocal.fileName : detectedPptxName)
     : (existingLocal?.fileName || `${title}.html`);
 
   if (isPdf && (/^_+(\.pdf)?$/i.test(finalFileName) || finalFileName.startsWith('___'))) {
     finalFileName = title.toLowerCase().endsWith('.pdf') ? title : `${title}.pdf`;
   }
+  if (isPptx && (/^_+(\.pptx|\.ppt)?$/i.test(finalFileName) || finalFileName.startsWith('___'))) {
+    finalFileName = (title.toLowerCase().endsWith('.pptx') || title.toLowerCase().endsWith('.ppt')) ? title : `${title}.pptx`;
+  }
 
   const finalFileType = isPdf
     ? '.pdf'
+    : isPptx
+    ? (rawUrlLower.endsWith('.ppt') ? '.ppt' : '.pptx')
     : (existingLocal?.fileType || (isRawUrlHtmlOrStorage ? '.html' : undefined));
 
-  const isInteractiveType = !isPdf && (
+  const isInteractiveType = !isPdf && !isPptx && (
     typeLower === 'simulation' ||
     typeLower.includes('simulation') ||
     typeLower.includes('محاكاة') ||
@@ -304,16 +333,16 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     thumbnailUrl,
     thumbnail_url: thumbnailUrl,
     image_url: thumbnailUrl,
-    url: isPdf ? (downloadUrl || rawUrl || fileUrl) : (rawUrl || downloadUrl || fileUrl),
-    download_url: isPdf ? (downloadUrl || rawUrl || fileUrl) : (downloadUrl || rawUrl || fileUrl),
-    fileUrl: isPdf ? (downloadUrl || rawUrl || fileUrl) : (fileUrl || (extractedHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}` : undefined)),
-    file_url: isPdf ? (downloadUrl || rawUrl || fileUrl) : fileUrl,
-    htmlContent: isPdf ? undefined : extractedHtml,
-    html_content: isPdf ? undefined : extractedHtml,
+    url: (isPdf || isPptx) ? (downloadUrl || rawUrl || fileUrl) : (rawUrl || downloadUrl || fileUrl),
+    download_url: (isPdf || isPptx) ? (downloadUrl || rawUrl || fileUrl) : (downloadUrl || rawUrl || fileUrl),
+    fileUrl: (isPdf || isPptx) ? (downloadUrl || rawUrl || fileUrl) : (fileUrl || (extractedHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(extractedHtml)}` : undefined)),
+    file_url: (isPdf || isPptx) ? (downloadUrl || rawUrl || fileUrl) : fileUrl,
+    htmlContent: (isPdf || isPptx) ? undefined : extractedHtml,
+    html_content: (isPdf || isPptx) ? undefined : extractedHtml,
     fileName: finalFileName,
-    fileType: isPdf ? '.pdf' : finalFileType,
-    resourceType: isPdf ? 'ملف PDF' : type,
-    type: isPdf ? 'ملف PDF' : type,
+    fileType: isPdf ? '.pdf' : isPptx ? (rawUrlLower.endsWith('.ppt') ? '.ppt' : '.pptx') : finalFileType,
+    resourceType: isPdf ? 'ملف PDF' : isPptx ? 'عرض تقديمي' : type,
+    type: isPdf ? 'ملف PDF' : isPptx ? 'عرض تقديمي' : type,
     subjectName,
     gradeName,
     gradeId,
@@ -334,7 +363,7 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
     ratingCount: existingLocal?.ratingCount ?? 0,
     usageCount: existingLocal?.usageCount ?? 0,
     downloadCount: existingLocal?.downloadCount ?? 0,
-    previewType: isPdf ? 'document' : (isInteractiveType ? 'html' : 'document'),
+    previewType: isPdf ? 'document' : isPptx ? 'presentation' : (isInteractiveType ? 'html' : 'document'),
     allowDownload: existingLocal?.allowDownload ?? true,
     allowPreview: existingLocal?.allowPreview ?? true,
     createdAt,

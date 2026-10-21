@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ResourceItem, isResourceInteractive, isPdfResource } from '../types';
+import { ResourceItem, isResourceInteractive, isPdfResource, isPptxResource } from '../types';
 import { getSimulationContent, generateInteractiveSimulationShell } from '../data/simulations';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PdfViewer } from './PdfViewer';
+import { PptxViewer } from './PptxViewer';
 import {
   X,
   Maximize2,
@@ -42,9 +43,10 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
   const [fetchedHtml, setFetchedHtml] = useState<string | null>(null);
 
   const isPdf = useMemo(() => Boolean(resource && isPdfResource(resource)), [resource]);
+  const isPptx = useMemo(() => Boolean(resource && isPptxResource(resource)), [resource]);
 
   // Check if resource is an interactive HTML simulation safely (unconditional Hook call)
-  const isInteractive = useMemo(() => Boolean(resource && !isPdf && typeof resource === 'object' && isResourceInteractive(resource)), [resource, isPdf]);
+  const isInteractive = useMemo(() => Boolean(resource && !isPdf && !isPptx && typeof resource === 'object' && isResourceInteractive(resource)), [resource, isPdf, isPptx]);
 
   // Resolve HTML code from all possible sources (unconditional Hook call):
   // 1. Direct htmlContent or html_content property
@@ -61,8 +63,8 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
       return;
     }
 
-    // PDF files do not require HTML fetching or simulation matching
-    if (isPdf) {
+    // PDF and PPTX files do not require HTML fetching or simulation matching
+    if (isPdf || isPptx) {
       setIsLoading(false);
       return;
     }
@@ -189,27 +191,27 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     }
   };
 
-  // Determine effective HTML content for srcDoc (for simulations/HTML only, NEVER for PDFs)
-  const resolvedHtmlContent = !isPdf
+  // Determine effective HTML content for srcDoc (for simulations/HTML only, NEVER for PDFs or PPTX)
+  const resolvedHtmlContent = (!isPdf && !isPptx)
     ? (resource?.htmlContent || resource?.html_content || fetchedHtml || (resource ? getSimulationContent(resource) : null))
     : null;
 
   const fileUrl = resource?.download_url || resource?.url || resource?.fileUrl || resource?.file_url || '';
   const isImage = fileUrl.startsWith('https://images.unsplash.com') || /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(fileUrl);
-  const isStorageOrHtmlUrl = !isPdf && (fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('/')) && !isImage && (fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm'));
+  const isStorageOrHtmlUrl = !isPdf && !isPptx && (fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('/')) && !isImage && (fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm'));
 
   // Determine whether to use srcDoc or public src URL
   let effectiveSrcDoc: string | undefined = undefined;
   let effectiveSrc: string | undefined = undefined;
 
-  if (isPdf) {
+  if (isPdf || isPptx) {
     effectiveSrcDoc = undefined;
     effectiveSrc = fileUrl;
   } else if (resolvedHtmlContent) {
     effectiveSrcDoc = resolvedHtmlContent;
   } else if (isStorageOrHtmlUrl) {
     effectiveSrc = fileUrl;
-  } else if (!isPdf && (isInteractive || resource?.type === 'simulation' || (resource?.resourceType || '').toLowerCase().includes('simulation') || (resource?.resourceType || '').includes('محاكاة') || (resource?.resourceType || '').includes('تفاعلي'))) {
+  } else if (!isPdf && !isPptx && (isInteractive || resource?.type === 'simulation' || (resource?.resourceType || '').toLowerCase().includes('simulation') || (resource?.resourceType || '').includes('محاكاة') || (resource?.resourceType || '').includes('تفاعلي'))) {
     effectiveSrcDoc = generateInteractiveSimulationShell(resource);
   } else {
     effectiveSrc = fileUrl;
@@ -326,10 +328,17 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
             </div>
           </div>
 
-          {/* Sandboxed Container / PDF Viewer */}
+          {/* Sandboxed Container / PDF / PPTX Viewer */}
           <div className="flex-1 bg-slate-950 relative overflow-hidden flex flex-col">
             {isPdf && fileUrl ? (
               <PdfViewer
+                url={fileUrl}
+                title={safeTitle}
+                onDownload={() => downloadResource(resource)}
+                className="w-full h-full flex-1 rounded-none border-none"
+              />
+            ) : isPptx && fileUrl ? (
+              <PptxViewer
                 url={fileUrl}
                 title={safeTitle}
                 onDownload={() => downloadResource(resource)}

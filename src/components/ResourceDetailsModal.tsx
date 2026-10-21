@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { ResourceItem, isAdminRole, isResourceInteractive, isPdfResource } from '../types';
+import { ResourceItem, isAdminRole, isResourceInteractive, isPdfResource, isPptxResource } from '../types';
 import { useResources } from '../context/ResourceContext';
 import { useAuth } from '../context/AuthContext';
 import { getSimulationContent, generateInteractiveSimulationShell } from '../data/simulations';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PdfViewer } from './PdfViewer';
+import { PptxViewer } from './PptxViewer';
 import {
   X,
   Play,
@@ -31,7 +32,8 @@ import {
   Image as ImageIcon,
   FileCode,
   Compass,
-  ExternalLink
+  ExternalLink,
+  Presentation
 } from 'lucide-react';
 
 interface ResourceDetailsModalProps {
@@ -66,14 +68,19 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
   const [showReviews, setShowReviews] = useState(false);
 
   const isPdf = useMemo(() => Boolean(resource && isPdfResource(resource)), [resource]);
-  const isInteractive = useMemo(() => Boolean(resource && !isPdf && isResourceInteractive(resource)), [resource, isPdf]);
+  const isPptx = useMemo(() => Boolean(resource && isPptxResource(resource)), [resource]);
+  const isInteractive = useMemo(() => Boolean(resource && !isPdf && !isPptx && isResourceInteractive(resource)), [resource, isPdf, isPptx]);
   const pdfActualUrl = useMemo(() => {
     if (!resource || !isPdf) return '';
     return resource.download_url || resource.url || resource.fileUrl || resource.file_url || '';
   }, [resource, isPdf]);
+  const pptxActualUrl = useMemo(() => {
+    if (!resource || !isPptx) return '';
+    return resource.download_url || resource.url || resource.fileUrl || resource.file_url || '';
+  }, [resource, isPptx]);
 
   const previewHtml = useMemo(() => {
-    if (!resource || typeof resource !== 'object' || isPdf) return null;
+    if (!resource || typeof resource !== 'object' || isPdf || isPptx) return null;
 
     const directHtml = resource.htmlContent || resource.html_content;
     if (directHtml && typeof directHtml === 'string' && directHtml.trim().length > 0) return directHtml;
@@ -450,6 +457,50 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
                       >
                         <Download className="w-3.5 h-3.5" />
                         <span>تحميل ملف PDF</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : isPptx ? (
+                <div className="space-y-3">
+                  {pptxActualUrl ? (
+                    <PptxViewer
+                      url={pptxActualUrl}
+                      title={safeTitle}
+                      onDownload={() => downloadResource(resource)}
+                      className="h-[70vh] min-h-[500px] w-full"
+                    />
+                  ) : (
+                    <div className="relative rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 h-[70vh] min-h-[500px] w-full shadow-inner flex flex-col items-center justify-center p-6 text-center text-slate-500">
+                      <Presentation className="w-12 h-12 text-slate-400 mb-2" />
+                      <p className="text-sm font-bold text-slate-700">رابط ملف العرض التقديمي غير متوفر حالياً</p>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-white rounded-xl border border-slate-200 text-xs">
+                    <div className="flex items-center gap-2.5 text-slate-700 font-bold min-w-0">
+                      <Presentation className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className="truncate max-w-xs">{resource?.fileName || safeTitle}</span>
+                      <span className="text-[11px] text-slate-400 font-normal shrink-0">(عرض تقديمي PowerPoint تعليمي معتمد)</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {pptxActualUrl && (
+                        <a
+                          href={pptxActualUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>فتح الملف في نافذة جديدة</span>
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => downloadResource(resource)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>تحميل ملف PowerPoint</span>
                       </button>
                     </div>
                   </div>

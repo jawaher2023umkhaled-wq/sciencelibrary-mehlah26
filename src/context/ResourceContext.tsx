@@ -11,7 +11,8 @@ import {
   GradeItem,
   SubjectItem,
   AuditLogItem,
-  isPdfResource
+  isPdfResource,
+  isPptxResource
 } from '../types';
 import { storageService } from '../services/storageService';
 import { supabase } from '../services/supabase';
@@ -968,8 +969,9 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     refreshResources();
 
     const isPdf = isPdfResource(resource);
+    const isPptx = isPptxResource(resource);
 
-    const storageOrHttpUrl = isPdf
+    const storageOrHttpUrl = (isPdf || isPptx)
       ? (resource.download_url || resource.url || resource.fileUrl || resource.file_url)
       : ((resource.download_url && resource.download_url.startsWith('http'))
           ? resource.download_url
@@ -997,6 +999,25 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         targetFileName = resource.title?.toLowerCase().endsWith('.pdf')
           ? resource.title
           : `${(resource.title || 'document').replace(/\s+/g, '_')}.pdf`;
+      }
+    } else if (isPptx) {
+      if (!targetFileName || (!targetFileName.toLowerCase().endsWith('.pptx') && !targetFileName.toLowerCase().endsWith('.ppt')) || /^_+(\.pptx|\.ppt)?$/i.test(targetFileName) || targetFileName.startsWith('___')) {
+        if (storageOrHttpUrl && storageOrHttpUrl.includes('/')) {
+          const rawPart = storageOrHttpUrl.split('/').pop()?.split('?')[0];
+          if (rawPart && (rawPart.toLowerCase().endsWith('.pptx') || rawPart.toLowerCase().endsWith('.ppt')) && !/^_+(\.pptx|\.ppt)?$/i.test(rawPart)) {
+            try {
+              targetFileName = decodeURIComponent(rawPart);
+            } catch {
+              targetFileName = rawPart;
+            }
+          }
+        }
+      }
+      if (!targetFileName || (!targetFileName.toLowerCase().endsWith('.pptx') && !targetFileName.toLowerCase().endsWith('.ppt')) || /^_+(\.pptx|\.ppt)?$/i.test(targetFileName) || targetFileName.startsWith('___')) {
+        const ext = storageOrHttpUrl?.toLowerCase().includes('.ppt?') || storageOrHttpUrl?.toLowerCase().endsWith('.ppt') ? '.ppt' : '.pptx';
+        targetFileName = (resource.title?.toLowerCase().endsWith('.pptx') || resource.title?.toLowerCase().endsWith('.ppt'))
+          ? resource.title
+          : `${(resource.title || 'presentation').replace(/\s+/g, '_')}${ext}`;
       }
     } else if (!targetFileName) {
       targetFileName = `${(resource.title || 'resource').replace(/\s+/g, '_')}.html`;
