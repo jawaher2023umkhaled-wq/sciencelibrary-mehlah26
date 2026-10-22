@@ -45,6 +45,28 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
   const isPdf = useMemo(() => Boolean(resource && isPdfResource(resource)), [resource]);
   const isPptx = useMemo(() => Boolean(resource && isPptxResource(resource)), [resource]);
 
+  const pptxActualUrl = useMemo(() => {
+    if (!resource || !isPptx) return '';
+    const candidates = [
+      resource.download_url,
+      resource.fileUrl,
+      resource.file_url,
+      resource.url
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim().length > 0) {
+        const clean = c.trim();
+        if (clean.startsWith('data:text/html') || clean.startsWith('<!DOCTYPE') || clean.startsWith('<html')) {
+          continue;
+        }
+        if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('/')) {
+          return clean;
+        }
+      }
+    }
+    return '';
+  }, [resource, isPptx]);
+
   // Check if resource is an interactive HTML simulation safely (unconditional Hook call)
   const isInteractive = useMemo(() => Boolean(resource && !isPdf && !isPptx && typeof resource === 'object' && isResourceInteractive(resource)), [resource, isPdf, isPptx]);
 
@@ -197,27 +219,6 @@ export const ResourceViewer: React.FC<ResourceViewerProps> = ({
     : null;
 
   const fileUrl = resource?.download_url || resource?.url || resource?.fileUrl || resource?.file_url || '';
-  const pptxActualUrl = useMemo(() => {
-    if (!resource || !isPptx) return '';
-    const candidates = [
-      resource.download_url,
-      resource.fileUrl,
-      resource.file_url,
-      resource.url
-    ];
-    for (const c of candidates) {
-      if (typeof c === 'string' && c.trim().length > 0) {
-        const clean = c.trim();
-        if (clean.startsWith('data:text/html') || clean.startsWith('<!DOCTYPE') || clean.startsWith('<html')) {
-          continue;
-        }
-        if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('/')) {
-          return clean;
-        }
-      }
-    }
-    return '';
-  }, [resource, isPptx]);
   const isImage = fileUrl.startsWith('https://images.unsplash.com') || /\.(png|jpg|jpeg|gif|webp|svg)($|\?)/i.test(fileUrl);
   const isStorageOrHtmlUrl = !isPdf && !isPptx && (fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('/')) && !isImage && (fileUrl.toLowerCase().includes('.html') || fileUrl.toLowerCase().includes('.htm'));
 

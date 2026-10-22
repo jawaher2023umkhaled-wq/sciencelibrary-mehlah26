@@ -132,7 +132,7 @@ export const ResourceDetailsModal: React.FC<ResourceDetailsModalProps> = ({
       return generateInteractiveSimulationShell(resource);
     }
     return null;
-  }, [resource, isInteractive, isPdf]);
+  }, [resource, isInteractive, isPdf, isPptx]);
 
   // Safe early exit if modal is not open, AFTER all hooks have executed
   if (!isOpen) {
