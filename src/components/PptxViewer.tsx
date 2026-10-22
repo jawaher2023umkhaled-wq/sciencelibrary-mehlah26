@@ -15,8 +15,7 @@ import {
   Minimize2,
   LayoutGrid,
   FileQuestion,
-  Sparkles,
-  RefreshCw
+  Sparkles
 } from 'lucide-react';
 
 export interface PptxViewerProps {
@@ -40,39 +39,50 @@ interface SlideParagraph {
   runs: SlideTextRun[];
 }
 
-interface SlideShapeElement {
+export interface SlideBaseElement {
   id: string;
-  type: 'shape';
   left: number;   // 0 - 100%
   top: number;    // 0 - 100%
   width: number;  // 0 - 100%
   height: number; // 0 - 100%
+  rotation?: number; // degrees
+  flipH?: boolean;
+  flipV?: boolean;
+  zIndex: number;
+}
+
+export interface SlideShapeElement extends SlideBaseElement {
+  type: 'shape';
+  geometry?: string; // rect, roundRect, ellipse, etc.
   backgroundColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
+  borderStyle?: string;
   paragraphs: SlideParagraph[];
 }
 
-interface SlideImageElement {
-  id: string;
+export interface SlideImageElement extends SlideBaseElement {
   type: 'image';
-  left: number;
-  top: number;
-  width: number;
-  height: number;
   imageUrl: string;
   alt?: string;
+  borderColor?: string;
+  borderWidth?: number;
 }
 
-interface SlideTableElement {
-  id: string;
+export interface SlideConnectorElement extends SlideBaseElement {
+  type: 'connector';
+  color?: string;
+  strokeWidth?: number;
+  headArrow?: boolean;
+  tailArrow?: boolean;
+}
+
+export interface SlideTableElement extends SlideBaseElement {
   type: 'table';
-  left: number;
-  top: number;
-  width: number;
-  height: number;
   rows: Array<Array<{ text: string; bg?: string }>>;
 }
 
-type SlideElement = SlideShapeElement | SlideImageElement | SlideTableElement;
+export type SlideElement = SlideShapeElement | SlideImageElement | SlideConnectorElement | SlideTableElement;
 
 interface SlideData {
   index: number;
@@ -84,7 +94,6 @@ interface SlideData {
 
 /**
  * Namespace-agnostic element locator.
- * Standard querySelector fails in XML DOM when elements use prefixes like <p:sp>, <a:r>, etc.
  */
 function findByLocalName(parent: Element | Document, localName: string): Element[] {
   try {
@@ -115,7 +124,7 @@ function findFirstByLocalName(parent: Element | Document, localName: string): El
 }
 
 /**
- * Parses XML string into DOM document with error detection
+ * Parses XML string into DOM document with fallback
  */
 function parseXmlDocument(xmlStr: string): Document | null {
   try {
@@ -123,7 +132,6 @@ function parseXmlDocument(xmlStr: string): Document | null {
     const doc = parser.parseFromString(xmlStr, 'application/xml');
     const parserError = doc.getElementsByTagName('parsererror');
     if (parserError && parserError.length > 0) {
-      // Fallback to text/xml
       return parser.parseFromString(xmlStr, 'text/xml');
     }
     return doc;
@@ -160,7 +168,7 @@ function parseRelationshipsXml(relsXmlStr: string): Record<string, string> {
     }
   }
 
-  // Backup regex to handle any weird non-standard XML encoding or attribute orders
+  // Backup regex to handle any non-standard XML encoding or attribute orders
   if (Object.keys(relMap).length === 0) {
     const relTagRegex = /<Relationship\b([^>]+)\/?>/gi;
     let match: RegExpExecArray | null;
@@ -181,6 +189,79 @@ function parseRelationshipsXml(relsXmlStr: string): Record<string, string> {
   }
 
   return relMap;
+}
+
+/**
+ * Resolves color from node considering srgbClr and schemeClr against theme palette
+ */
+function resolveColor(node: Element | null, themeColors: Record<string, string>): string | undefined {
+  if (!node) return undefined;
+
+  // 1. Direct srgbClr
+  const srgb = findFirstByLocalName(node, 'srgbClr');
+  if (srgb) {
+    const val = srgb.getAttribute('val');
+    if (val && /^[0-9a-fA-F]{6}$/.test(val)) return `#${val}`;
+  }
+
+  // 2. Scheme color mapping to presentation theme
+  const scheme = findFirstByLocalName(node, 'schemeClr');
+  if (scheme) {
+    const val = scheme.getAttribute('val');
+    if (val && themeColors[val]) {
+      return themeColors[val];
+    }
+  }
+
+  // 3. System color (e.g. windowText)
+  const sys = findFirstByLocalName(node, 'sysClr');
+  if (sys) {
+    const lastClr = sys.getAttribute('lastClr');
+    if (lastClr && /^[0-9a-fA-F]{6}$/.test(lastClr)) return `#${lastClr}`;
+  }
+
+  return undefined;
+}
+
+/**
+ * Extracts transform coordinates in percentages and rotation/flip
+ */
+function extractTransform(
+  parentElem: Element,
+  slideCx: number,
+  slideCy: number
+): {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  flipH?: boolean;
+  flipV?: boolean;
+} | null {
+  const xfrm = findFirstByLocalName(parentElem, 'xfrm');
+  if (!xfrm) return null;
+
+  const off = findFirstByLocalName(xfrm, 'off');
+  const ext = findFirstByLocalName(xfrm, 'ext');
+  if (!off || !ext) return null;
+
+  const rawX = parseInt(off.getAttribute('x') || '0', 10);
+  const rawY = parseInt(off.getAttribute('y') || '0', 10);
+  const rawCx = parseInt(ext.getAttribute('cx') || '0', 10);
+  const rawCy = parseInt(ext.getAttribute('cy') || '0', 10);
+
+  const left = Math.max(0, Math.min(100, (rawX / slideCx) * 100));
+  const top = Math.max(0, Math.min(100, (rawY / slideCy) * 100));
+  const width = Math.max(0.5, Math.min(100, (rawCx / slideCx) * 100));
+  const height = Math.max(0.5, Math.min(100, (rawCy / slideCy) * 100));
+
+  const rotVal = xfrm.getAttribute('rot');
+  const rotation = rotVal ? parseInt(rotVal, 10) / 60000 : undefined;
+  const flipH = xfrm.getAttribute('flipH') === '1' || xfrm.getAttribute('flipH') === 'true';
+  const flipV = xfrm.getAttribute('flipV') === '1' || xfrm.getAttribute('flipV') === 'true';
+
+  return { left, top, width, height, rotation, flipH, flipV };
 }
 
 export const PptxViewer: React.FC<PptxViewerProps> = ({
@@ -267,7 +348,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
         }
 
         if (isCancelled) return;
-        setLoadingProgress('جارٍ فك حزمة PowerPoint واستخراج الشرائح...');
+        setLoadingProgress('جارٍ فك حزمة PowerPoint وقراءة القوالب والسمات...');
         const arrayBuffer = await response.arrayBuffer();
 
         if (isCancelled) return;
@@ -283,7 +364,38 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
 
         if (isCancelled) return;
 
-        // 3. Determine presentation dimensions and aspect ratio
+        // 3. Load Theme Colors (accent1 - accent6, dk1, lt1, etc.)
+        const themeColors: Record<string, string> = {
+          dk1: '#000000',
+          lt1: '#ffffff',
+          dk2: '#1f497d',
+          lt2: '#eeece1',
+          accent1: '#4f81bd',
+          accent2: '#c0504d',
+          accent3: '#9bbb59',
+          accent4: '#8064a2',
+          accent5: '#4bacc6',
+          accent6: '#f79646',
+          tx1: '#000000',
+          tx2: '#1f497d',
+          bg1: '#ffffff',
+          bg2: '#eeece1'
+        };
+
+        const themeFile = zip.file('ppt/theme/theme1.xml');
+        if (themeFile) {
+          try {
+            const themeXml = await themeFile.async('text');
+            const clrMatches = [...themeXml.matchAll(/<a:(dk1|lt1|dk2|lt2|accent1|accent2|accent3|accent4|accent5|accent6|hlink|folHlink)>[\s\S]*?<a:srgbClr val="([^"]+)"/g)];
+            clrMatches.forEach(m => {
+              themeColors[m[1]] = `#${m[2]}`;
+            });
+          } catch (themeErr) {
+            console.warn('Could not parse theme1.xml colors, using defaults:', themeErr);
+          }
+        }
+
+        // 4. Determine presentation dimensions and aspect ratio
         let slideCx = 9144000;
         let slideCy = 6858000;
         const presFile = zip.file('ppt/presentation.xml');
@@ -306,7 +418,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
           }
         }
 
-        // 4. Find all slide files in order
+        // 5. Find all slide files in order
         const slideFiles = Object.keys(zip.files)
           .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
           .sort((a, b) => {
@@ -319,11 +431,11 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
           throw new Error('لم يتم العثور على شرائح صالحة داخل حزمة العرض التقديمي (.pptx).');
         }
 
-        setLoadingProgress(`جارٍ معالجة وتجهيز ${slideFiles.length} شريحة تعليمية...`);
+        setLoadingProgress(`جارٍ استخراج وتجهيز ${slideFiles.length} شريحة تعليمية بجميع عناصرها...`);
 
         const parsedSlides: SlideData[] = [];
 
-        // 5. Parse each slide
+        // 6. Parse each slide preserving exact DOM Z-order
         for (let i = 0; i < slideFiles.length; i++) {
           if (isCancelled) return;
 
@@ -331,7 +443,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
           const slideNumber = i + 1;
           const slideXmlStr = await zip.file(slideFileName)!.async('text');
 
-          // Read relationships for images: ppt/slides/_rels/slide{N}.xml.rels
+          // Read relationships for media/images: ppt/slides/_rels/slide{N}.xml.rels
           const relsFileName = slideFileName.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels';
           const relsFile = zip.file(relsFileName);
           let relMap: Record<string, string> = {};
@@ -370,275 +482,374 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
           // Background color detection
           let slideBgColor: string | undefined = undefined;
           if (slideDoc) {
-            const bgClrElems = findByLocalName(slideDoc, 'srgbClr');
-            for (const clr of bgClrElems) {
-              const parent = clr.parentElement;
-              if (parent && (parent.localName === 'bgPr' || parent.localName === 'bg' || parent.localName === 'solidFill')) {
-                const val = clr.getAttribute('val');
-                if (val && /^[0-9a-fA-F]{6}$/.test(val)) {
-                  slideBgColor = `#${val}`;
-                  break;
-                }
-              }
+            const bgNode = findFirstByLocalName(slideDoc, 'bg') || findFirstByLocalName(slideDoc, 'bgPr');
+            if (bgNode) {
+              slideBgColor = resolveColor(bgNode, themeColors);
             }
           }
 
           const elements: SlideElement[] = [];
           const textCollector: string[] = [];
 
-          // Helper to extract transform coordinates (x, y, cx, cy) in percentages
-          const extractTransform = (parentElem: Element) => {
-            const xfrm = findFirstByLocalName(parentElem, 'xfrm');
-            if (!xfrm) return null;
+          // Helper to extract shape border/line
+          const extractBorder = (spNode: Element) => {
+            const ln = findFirstByLocalName(spNode, 'ln');
+            if (!ln) return { borderColor: undefined, borderWidth: undefined, borderStyle: undefined };
 
-            const off = findFirstByLocalName(xfrm, 'off');
-            const ext = findFirstByLocalName(xfrm, 'ext');
-            if (!off || !ext) return null;
+            const borderColor = resolveColor(ln, themeColors);
+            const wAttr = ln.getAttribute('w');
+            // w is in EMUs (1 pt = 12700 EMUs, or 9525 EMUs)
+            const borderWidth = wAttr ? Math.max(1, Math.round(parseInt(wAttr, 10) / 12700)) : (borderColor ? 1 : undefined);
+            
+            let borderStyle = 'solid';
+            const prstDash = findFirstByLocalName(ln, 'prstDash');
+            if (prstDash) {
+              const dashVal = prstDash.getAttribute('val');
+              if (dashVal?.includes('dash')) borderStyle = 'dashed';
+              else if (dashVal?.includes('dot')) borderStyle = 'dotted';
+            }
 
-            const rawX = parseInt(off.getAttribute('x') || '0', 10);
-            const rawY = parseInt(off.getAttribute('y') || '0', 10);
-            const rawCx = parseInt(ext.getAttribute('cx') || '0', 10);
-            const rawCy = parseInt(ext.getAttribute('cy') || '0', 10);
+            return { borderColor, borderWidth, borderStyle };
+          };
 
-            const left = Math.max(0, Math.min(100, (rawX / slideCx) * 100));
-            const top = Math.max(0, Math.min(100, (rawY / slideCy) * 100));
-            const width = Math.max(1, Math.min(100, (rawCx / slideCx) * 100));
-            const height = Math.max(1, Math.min(100, (rawCy / slideCy) * 100));
-
-            return { left, top, width, height };
+          // Helper to extract shape background
+          const extractBackground = (spNode: Element) => {
+            const spPr = findFirstByLocalName(spNode, 'spPr');
+            if (!spPr) return undefined;
+            return resolveColor(spPr, themeColors);
           };
 
           if (slideDoc) {
-            // A. Parse Shapes / Textboxes: <p:sp>
-            const shapeNodes = findByLocalName(slideDoc, 'sp');
-            for (let sIdx = 0; sIdx < shapeNodes.length; sIdx++) {
-              const sp = shapeNodes[sIdx];
-              const tf = extractTransform(sp);
-              if (!tf) continue;
+            const spTree = findFirstByLocalName(slideDoc, 'spTree');
+            if (spTree) {
+              // Traverse children of spTree in document order to guarantee proper layer ordering (Z-Index)
+              const children = Array.from(spTree.children);
 
-              // Background color of shape
-              let shapeBg: string | undefined = undefined;
-              const spPr = findFirstByLocalName(sp, 'spPr');
-              if (spPr) {
-                const solidFill = findFirstByLocalName(spPr, 'solidFill');
-                if (solidFill) {
-                  const srgbClr = findFirstByLocalName(solidFill, 'srgbClr');
-                  const val = srgbClr?.getAttribute('val');
-                  if (val && /^[0-9a-fA-F]{6}$/.test(val)) {
-                    shapeBg = `#${val}`;
-                  }
-                }
-              }
+              for (let cIdx = 0; cIdx < children.length; cIdx++) {
+                const child = children[cIdx];
+                const nodeType = child.localName;
+                const zIndex = cIdx + 1; // Preserve exact XML DOM order as Z-index
 
-              // Paragraphs & Runs
-              const paragraphs: SlideParagraph[] = [];
-              const txBody = findFirstByLocalName(sp, 'txBody');
-              const pNodes = txBody ? findByLocalName(txBody, 'p') : [];
+                // A. Parse Shapes and Text Boxes: <p:sp>
+                if (nodeType === 'sp') {
+                  const tf = extractTransform(child, slideCx, slideCy);
+                  if (!tf) continue;
 
-              for (const pNode of pNodes) {
-                const pPr = findFirstByLocalName(pNode, 'pPr');
-                const algn = pPr?.getAttribute('algn');
-                let align: 'left' | 'center' | 'right' | 'justify' = 'right';
-                if (algn === 'ctr') align = 'center';
-                else if (algn === 'l') align = 'left';
-                else if (algn === 'just') align = 'justify';
+                  const geometry = findFirstByLocalName(child, 'prstGeom')?.getAttribute('prst') || 'rect';
+                  const shapeBg = extractBackground(child);
+                  const { borderColor, borderWidth, borderStyle } = extractBorder(child);
 
-                const runs: SlideTextRun[] = [];
-                const rNodes = findByLocalName(pNode, 'r');
+                  // Extract text paragraphs and runs
+                  const paragraphs: SlideParagraph[] = [];
+                  const txBody = findFirstByLocalName(child, 'txBody');
+                  const pNodes = txBody ? findByLocalName(txBody, 'p') : [];
 
-                for (const rNode of rNodes) {
-                  const tElem = findFirstByLocalName(rNode, 't');
-                  const text = tElem?.textContent || '';
-                  if (!text) continue;
+                  for (const pNode of pNodes) {
+                    const pPr = findFirstByLocalName(pNode, 'pPr');
+                    const algn = pPr?.getAttribute('algn');
+                    let align: 'left' | 'center' | 'right' | 'justify' = 'right';
+                    if (algn === 'ctr') align = 'center';
+                    else if (algn === 'l') align = 'left';
+                    else if (algn === 'just') align = 'justify';
 
-                  textCollector.push(text);
+                    const runs: SlideTextRun[] = [];
+                    const rNodes = findByLocalName(pNode, 'r');
 
-                  const rPr = findFirstByLocalName(rNode, 'rPr');
-                  const bold = rPr ? (rPr.getAttribute('b') === '1' || rPr.getAttribute('b') === 'true') : false;
-                  const italic = rPr ? (rPr.getAttribute('i') === '1' || rPr.getAttribute('i') === 'true') : false;
-                  const underline = rPr ? (rPr.getAttribute('u') === 'sng') : false;
-                  const sz = rPr ? parseInt(rPr.getAttribute('sz') || '0', 10) : 0;
-                  const fontSizePt = sz > 0 ? sz / 100 : undefined;
+                    for (const rNode of rNodes) {
+                      const tElem = findFirstByLocalName(rNode, 't');
+                      const text = tElem?.textContent || '';
+                      if (!text) continue;
 
-                  let color: string | undefined = undefined;
-                  const clrElem = rPr ? findFirstByLocalName(rPr, 'srgbClr') : null;
-                  if (clrElem) {
-                    const val = clrElem.getAttribute('val');
-                    if (val && /^[0-9a-fA-F]{6}$/.test(val)) {
-                      color = `#${val}`;
+                      textCollector.push(text);
+
+                      const rPr = findFirstByLocalName(rNode, 'rPr');
+                      const bold = rPr ? (rPr.getAttribute('b') === '1' || rPr.getAttribute('b') === 'true') : false;
+                      const italic = rPr ? (rPr.getAttribute('i') === '1' || rPr.getAttribute('i') === 'true') : false;
+                      const underline = rPr ? (rPr.getAttribute('u') === 'sng') : false;
+                      const sz = rPr ? parseInt(rPr.getAttribute('sz') || '0', 10) : 0;
+                      const fontSizePt = sz > 0 ? sz / 100 : undefined;
+                      const color = resolveColor(rPr, themeColors);
+
+                      runs.push({
+                        text,
+                        bold,
+                        italic,
+                        underline,
+                        color,
+                        fontSizePt
+                      });
+                    }
+
+                    if (runs.length > 0) {
+                      paragraphs.push({ align, runs });
                     }
                   }
 
-                  runs.push({
-                    text,
-                    bold,
-                    italic,
-                    underline,
-                    color,
-                    fontSizePt
+                  if (paragraphs.length > 0 || shapeBg || borderColor) {
+                    elements.push({
+                      id: `sp-${slideNumber}-${cIdx}`,
+                      type: 'shape',
+                      left: tf.left,
+                      top: tf.top,
+                      width: tf.width,
+                      height: tf.height,
+                      rotation: tf.rotation,
+                      flipH: tf.flipH,
+                      flipV: tf.flipV,
+                      zIndex,
+                      geometry,
+                      backgroundColor: shapeBg,
+                      borderColor,
+                      borderWidth,
+                      borderStyle,
+                      paragraphs
+                    });
+                  }
+                }
+
+                // B. Parse Pictures / Images: <p:pic>
+                else if (nodeType === 'pic') {
+                  const tf = extractTransform(child, slideCx, slideCy);
+                  if (!tf) continue;
+
+                  const blip = findFirstByLocalName(child, 'blip');
+                  if (!blip) continue;
+
+                  // Extract embed relationship id
+                  let embedId: string | null = null;
+                  for (let a = 0; a < blip.attributes.length; a++) {
+                    const attr = blip.attributes[a];
+                    if (attr.localName === 'embed' || attr.name === 'r:embed' || attr.name === 'embed') {
+                      embedId = attr.value;
+                      break;
+                    }
+                  }
+                  if (!embedId) {
+                    embedId = blip.getAttribute('r:embed') || blip.getAttribute('embed');
+                  }
+
+                  if (embedId && imageBlobUrls[embedId]) {
+                    const { borderColor, borderWidth } = extractBorder(child);
+
+                    elements.push({
+                      id: `pic-${slideNumber}-${cIdx}`,
+                      type: 'image',
+                      left: tf.left,
+                      top: tf.top,
+                      width: tf.width,
+                      height: tf.height,
+                      rotation: tf.rotation,
+                      flipH: tf.flipH,
+                      flipV: tf.flipV,
+                      zIndex,
+                      imageUrl: imageBlobUrls[embedId],
+                      borderColor,
+                      borderWidth,
+                      alt: `صورة شريحة ${slideNumber}`
+                    });
+                  }
+                }
+
+                // C. Parse Connection Lines / Arrows: <p:cxnSp>
+                else if (nodeType === 'cxnSp') {
+                  const tf = extractTransform(child, slideCx, slideCy);
+                  if (!tf) continue;
+
+                  // Extract line color from line or style/lnRef
+                  let strokeColor: string | undefined = undefined;
+                  const spPr = findFirstByLocalName(child, 'spPr');
+                  if (spPr) {
+                    const ln = findFirstByLocalName(spPr, 'ln');
+                    if (ln) {
+                      strokeColor = resolveColor(ln, themeColors);
+                    }
+                  }
+
+                  if (!strokeColor) {
+                    const style = findFirstByLocalName(child, 'style');
+                    if (style) {
+                      const lnRef = findFirstByLocalName(style, 'lnRef');
+                      if (lnRef) {
+                        strokeColor = resolveColor(lnRef, themeColors);
+                      }
+                    }
+                  }
+
+                  const ln = spPr ? findFirstByLocalName(spPr, 'ln') : null;
+                  const wAttr = ln?.getAttribute('w');
+                  const strokeWidth = wAttr ? Math.max(1.5, Math.round(parseInt(wAttr, 10) / 12700)) : 3;
+
+                  // Check arrowheads
+                  const headEnd = ln ? findFirstByLocalName(ln, 'headEnd') : null;
+                  const tailEnd = ln ? findFirstByLocalName(ln, 'tailEnd') : null;
+                  const headArrow = headEnd?.getAttribute('type') === 'triangle';
+                  const tailArrow = tailEnd?.getAttribute('type') === 'triangle';
+
+                  elements.push({
+                    id: `cxn-${slideNumber}-${cIdx}`,
+                    type: 'connector',
+                    left: tf.left,
+                    top: tf.top,
+                    width: tf.width,
+                    height: tf.height,
+                    rotation: tf.rotation,
+                    flipH: tf.flipH,
+                    flipV: tf.flipV,
+                    zIndex,
+                    color: strokeColor || themeColors.accent1 || '#4f81bd',
+                    strokeWidth,
+                    headArrow,
+                    tailArrow
                   });
                 }
 
-                if (runs.length > 0) {
-                  paragraphs.push({ align, runs });
+                // D. Parse Tables: <a:tbl> inside <p:graphicFrame>
+                else if (nodeType === 'graphicFrame') {
+                  const tf = extractTransform(child, slideCx, slideCy);
+                  if (!tf) continue;
+
+                  const tbl = findFirstByLocalName(child, 'tbl');
+                  if (!tbl) continue;
+
+                  const trNodes = findByLocalName(tbl, 'tr');
+                  const tableRows: Array<Array<{ text: string; bg?: string }>> = [];
+
+                  for (const tr of trNodes) {
+                    const tcNodes = findByLocalName(tr, 'tc');
+                    const rowCells: Array<{ text: string; bg?: string }> = [];
+
+                    for (const tc of tcNodes) {
+                      const tElems = findByLocalName(tc, 't');
+                      const cellText = tElems.map(t => t.textContent || '').filter(Boolean).join(' ');
+                      if (cellText) textCollector.push(cellText);
+                      const tcPr = findFirstByLocalName(tc, 'tcPr');
+                      const bg = tcPr ? resolveColor(tcPr, themeColors) : undefined;
+                      rowCells.push({ text: cellText, bg });
+                    }
+
+                    if (rowCells.length > 0) {
+                      tableRows.push(rowCells);
+                    }
+                  }
+
+                  if (tableRows.length > 0) {
+                    elements.push({
+                      id: `tbl-${slideNumber}-${cIdx}`,
+                      type: 'table',
+                      left: tf.left,
+                      top: tf.top,
+                      width: tf.width,
+                      height: tf.height,
+                      rotation: tf.rotation,
+                      flipH: tf.flipH,
+                      flipV: tf.flipV,
+                      zIndex,
+                      rows: tableRows
+                    });
+                  }
                 }
-              }
-
-              if (paragraphs.length > 0 || shapeBg) {
-                elements.push({
-                  id: `sp-${slideNumber}-${sIdx}`,
-                  type: 'shape',
-                  left: tf.left,
-                  top: tf.top,
-                  width: tf.width,
-                  height: tf.height,
-                  backgroundColor: shapeBg,
-                  paragraphs
-                });
-              }
-            }
-
-            // B. Parse Pictures / Images: <p:pic>
-            const picNodes = findByLocalName(slideDoc, 'pic');
-            for (let pIdx = 0; pIdx < picNodes.length; pIdx++) {
-              const pic = picNodes[pIdx];
-              const tf = extractTransform(pic);
-              if (!tf) continue;
-
-              const blip = findFirstByLocalName(pic, 'blip');
-              if (!blip) continue;
-
-              // Extract embed relationship id
-              let embedId: string | null = null;
-              for (let a = 0; a < blip.attributes.length; a++) {
-                const attr = blip.attributes[a];
-                if (attr.localName === 'embed' || attr.name === 'r:embed' || attr.name === 'embed') {
-                  embedId = attr.value;
-                  break;
-                }
-              }
-              if (!embedId) {
-                embedId = blip.getAttribute('r:embed') || blip.getAttribute('embed');
-              }
-
-              if (embedId && imageBlobUrls[embedId]) {
-                elements.push({
-                  id: `pic-${slideNumber}-${pIdx}`,
-                  type: 'image',
-                  left: tf.left,
-                  top: tf.top,
-                  width: tf.width,
-                  height: tf.height,
-                  imageUrl: imageBlobUrls[embedId],
-                  alt: `صورة شريحة ${slideNumber}`
-                });
-              }
-            }
-
-            // C. Parse Tables: <a:tbl> inside <p:graphicFrame>
-            const frameNodes = findByLocalName(slideDoc, 'graphicFrame');
-            for (let fIdx = 0; fIdx < frameNodes.length; fIdx++) {
-              const frame = frameNodes[fIdx];
-              const tf = extractTransform(frame);
-              if (!tf) continue;
-
-              const tbl = findFirstByLocalName(frame, 'tbl');
-              if (!tbl) continue;
-
-              const trNodes = findByLocalName(tbl, 'tr');
-              const tableRows: Array<Array<{ text: string; bg?: string }>> = [];
-
-              for (const tr of trNodes) {
-                const tcNodes = findByLocalName(tr, 'tc');
-                const rowCells: Array<{ text: string; bg?: string }> = [];
-
-                for (const tc of tcNodes) {
-                  const tElems = findByLocalName(tc, 't');
-                  const cellText = tElems.map(t => t.textContent || '').filter(Boolean).join(' ');
-                  if (cellText) textCollector.push(cellText);
-                  rowCells.push({ text: cellText });
-                }
-
-                if (rowCells.length > 0) {
-                  tableRows.push(rowCells);
-                }
-              }
-
-              if (tableRows.length > 0) {
-                elements.push({
-                  id: `tbl-${slideNumber}-${fIdx}`,
-                  type: 'table',
-                  left: tf.left,
-                  top: tf.top,
-                  width: tf.width,
-                  height: tf.height,
-                  rows: tableRows
-                });
               }
             }
           }
 
-          // Safety Fallback: Regex-based extraction if DOM elements were empty but XML has content
+          // Safety Fallback: Regex extraction in exact order if DOM elements were empty
           if (elements.length === 0) {
-            // Check regex for pictures
-            const picRegex = /<p:pic\b[\s\S]*?<\/p:pic>/g;
-            let pMatch: RegExpExecArray | null;
-            let pIndex = 0;
-            while ((pMatch = picRegex.exec(slideXmlStr)) !== null) {
-              const pXml = pMatch[0];
-              const embedM = pXml.match(/r:embed="([^"]+)"/) || pXml.match(/embed="([^"]+)"/);
-              const xM = pXml.match(/<a:off\s+[^>]*x="(-?\d+)"\s+[^>]*y="(-?\d+)"/) || pXml.match(/x="(-?\d+)"\s+y="(-?\d+)"/);
-              const extM = pXml.match(/<a:ext\s+[^>]*cx="(\d+)"\s+[^>]*cy="(\d+)"/) || pXml.match(/cx="(\d+)"\s+cy="(\d+)"/);
-              if (embedM && xM && extM) {
-                const embedId = embedM[1];
-                if (imageBlobUrls[embedId]) {
-                  const rawX = parseInt(xM[1], 10);
-                  const rawY = parseInt(xM[2], 10);
-                  const rawCx = parseInt(extM[1], 10);
-                  const rawCy = parseInt(extM[2], 10);
-                  elements.push({
-                    id: `fb-pic-${slideNumber}-${pIndex++}`,
-                    type: 'image',
-                    left: Math.max(0, Math.min(100, (rawX / slideCx) * 100)),
-                    top: Math.max(0, Math.min(100, (rawY / slideCy) * 100)),
-                    width: Math.max(1, Math.min(100, (rawCx / slideCx) * 100)),
-                    height: Math.max(1, Math.min(100, (rawCy / slideCy) * 100)),
-                    imageUrl: imageBlobUrls[embedId],
-                    alt: `صورة شريحة ${slideNumber}`
-                  });
-                }
-              }
-            }
+            const spTreeMatch = slideXmlStr.match(/<p:spTree>([\s\S]*?)<\/p:spTree>/);
+            const spTreeContent = spTreeMatch ? spTreeMatch[1] : slideXmlStr;
 
-            // Check regex for text shapes
-            const spRegex = /<p:sp\b[\s\S]*?<\/p:sp>/g;
-            let sMatch: RegExpExecArray | null;
-            let sIndex = 0;
-            while ((sMatch = spRegex.exec(slideXmlStr)) !== null) {
-              const sXml = sMatch[0];
-              const tMatches = [...sXml.matchAll(/<a:t>([^<]+)<\/a:t>/g)].map(m => m[1]);
-              const xM = sXml.match(/<a:off\s+[^>]*x="(-?\d+)"\s+[^>]*y="(-?\d+)"/) || sXml.match(/x="(-?\d+)"\s+y="(-?\d+)"/);
-              const extM = sXml.match(/<a:ext\s+[^>]*cx="(\d+)"\s+[^>]*cy="(\d+)"/) || sXml.match(/cx="(\d+)"\s+cy="(\d+)"/);
-              if (tMatches.length > 0 && xM && extM) {
+            const elemRegex = /<p:(sp|pic|cxnSp)\b([\s\S]*?)<\/p:\1>/g;
+            let m: RegExpExecArray | null;
+            let elemIdx = 0;
+
+            while ((m = elemRegex.exec(spTreeContent)) !== null) {
+              const type = m[1];
+              const inner = m[2];
+              elemIdx++;
+
+              const xM = inner.match(/<a:off\s+[^>]*x="(-?\d+)"\s+[^>]*y="(-?\d+)"/) || inner.match(/x="(-?\d+)"\s+y="(-?\d+)"/);
+              const extM = inner.match(/<a:ext\s+[^>]*cx="(\d+)"\s+[^>]*cy="(\d+)"/) || inner.match(/cx="(\d+)"\s+cy="(\d+)"/);
+
+              if (xM && extM) {
                 const rawX = parseInt(xM[1], 10);
                 const rawY = parseInt(xM[2], 10);
                 const rawCx = parseInt(extM[1], 10);
                 const rawCy = parseInt(extM[2], 10);
-                tMatches.forEach(t => textCollector.push(t));
-                elements.push({
-                  id: `fb-sp-${slideNumber}-${sIndex++}`,
-                  type: 'shape',
-                  left: Math.max(0, Math.min(100, (rawX / slideCx) * 100)),
-                  top: Math.max(0, Math.min(100, (rawY / slideCy) * 100)),
-                  width: Math.max(1, Math.min(100, (rawCx / slideCx) * 100)),
-                  height: Math.max(1, Math.min(100, (rawCy / slideCy) * 100)),
-                  paragraphs: [
-                    {
-                      align: 'right',
-                      runs: tMatches.map(t => ({ text: t, bold: true, fontSizePt: 16 }))
-                    }
-                  ]
-                });
+                const left = Math.max(0, Math.min(100, (rawX / slideCx) * 100));
+                const top = Math.max(0, Math.min(100, (rawY / slideCy) * 100));
+                const width = Math.max(0.5, Math.min(100, (rawCx / slideCx) * 100));
+                const height = Math.max(0.5, Math.min(100, (rawCy / slideCy) * 100));
+
+                const rotM = inner.match(/rot="(\d+)"/);
+                const rotation = rotM ? parseInt(rotM[1], 10) / 60000 : undefined;
+                const flipH = inner.includes('flipH="1"');
+                const flipV = inner.includes('flipV="1"');
+
+                if (type === 'pic') {
+                  const embedM = inner.match(/r:embed="([^"]+)"/) || inner.match(/embed="([^"]+)"/);
+                  if (embedM && imageBlobUrls[embedM[1]]) {
+                    elements.push({
+                      id: `fb-pic-${slideNumber}-${elemIdx}`,
+                      type: 'image',
+                      left,
+                      top,
+                      width,
+                      height,
+                      rotation,
+                      flipH,
+                      flipV,
+                      zIndex: elemIdx,
+                      imageUrl: imageBlobUrls[embedM[1]],
+                      alt: `صورة شريحة ${slideNumber}`
+                    });
+                  }
+                } else if (type === 'cxnSp') {
+                  const clrM = inner.match(/val="([^"]+)"/);
+                  const clrVal = clrM ? clrM[1] : undefined;
+                  const color = clrVal ? (themeColors[clrVal] || (clrVal.length === 6 ? `#${clrVal}` : undefined)) : themeColors.accent1;
+
+                  elements.push({
+                    id: `fb-cxn-${slideNumber}-${elemIdx}`,
+                    type: 'connector',
+                    left,
+                    top,
+                    width,
+                    height,
+                    rotation,
+                    flipH,
+                    flipV,
+                    zIndex: elemIdx,
+                    color: color || '#4f81bd',
+                    strokeWidth: 3
+                  });
+                } else if (type === 'sp') {
+                  const tMatches = [...inner.matchAll(/<a:t>([^<]+)<\/a:t>/g)].map(t => t[1]);
+                  const clrM = inner.match(/<a:solidFill>[\s\S]*?val="([^"]+)"/);
+                  const bgVal = clrM ? clrM[1] : undefined;
+                  const backgroundColor = bgVal ? (themeColors[bgVal] || (bgVal.length === 6 ? `#${bgVal}` : undefined)) : undefined;
+
+                  if (tMatches.length > 0 || backgroundColor) {
+                    tMatches.forEach(t => textCollector.push(t));
+                    elements.push({
+                      id: `fb-sp-${slideNumber}-${elemIdx}`,
+                      type: 'shape',
+                      left,
+                      top,
+                      width,
+                      height,
+                      rotation,
+                      flipH,
+                      flipV,
+                      zIndex: elemIdx,
+                      backgroundColor,
+                      paragraphs: [
+                        {
+                          align: 'right',
+                          runs: tMatches.map(t => ({ text: t, bold: true, fontSizePt: 15 }))
+                        }
+                      ]
+                    });
+                  }
+                }
               }
             }
           }
@@ -868,7 +1079,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
           </div>
         )}
 
-        {/* Error Fallback State (Requirement #5) */}
+        {/* Error Fallback State */}
         {!loading && (error || slides.length === 0) && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-6 text-center bg-slate-950 text-white">
             <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4 shadow-lg shadow-amber-500/5">
@@ -938,19 +1149,33 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                   backgroundColor: currentSlide.backgroundColor || '#ffffff'
                 }}
               >
-                {/* Render Slide Elements */}
+                {/* Render Slide Elements in exact Z-order */}
                 {currentSlide.elements.map(elem => {
+                  // A. Render Shape / Textbox
                   if (elem.type === 'shape') {
+                    let roundedClass = 'rounded-none';
+                    if (elem.geometry === 'roundRect') roundedClass = 'rounded-xl sm:rounded-2xl';
+                    else if (elem.geometry === 'ellipse') roundedClass = 'rounded-full';
+                    else if (elem.geometry === 'rect') roundedClass = 'rounded-sm';
+
+                    const transformParts: string[] = [];
+                    if (elem.rotation) transformParts.push(`rotate(${elem.rotation}deg)`);
+                    if (elem.flipH) transformParts.push('scaleX(-1)');
+                    if (elem.flipV) transformParts.push('scaleY(-1)');
+
                     return (
                       <div
                         key={elem.id}
-                        className="absolute flex flex-col justify-center overflow-hidden p-1.5 leading-snug rounded-xs"
+                        className={`absolute flex flex-col justify-center overflow-hidden p-1 sm:p-1.5 leading-snug ${roundedClass}`}
                         style={{
                           left: `${elem.left}%`,
                           top: `${elem.top}%`,
                           width: `${elem.width}%`,
                           height: `${elem.height}%`,
-                          backgroundColor: elem.backgroundColor || 'transparent'
+                          backgroundColor: elem.backgroundColor || 'transparent',
+                          border: elem.borderColor ? `${elem.borderWidth || 1}px ${elem.borderStyle || 'solid'} ${elem.borderColor}` : undefined,
+                          zIndex: elem.zIndex,
+                          transform: transformParts.length > 0 ? transformParts.join(' ') : undefined
                         }}
                       >
                         {elem.paragraphs.map((p, pIdx) => (
@@ -958,6 +1183,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                             key={pIdx}
                             className="w-full my-0.5 leading-relaxed"
                             style={{ textAlign: p.align || 'right' }}
+                            dir="rtl"
                           >
                             {p.runs.map((r, rIdx) => (
                               <span
@@ -966,9 +1192,9 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                                   fontWeight: r.bold ? 'bold' : 'normal',
                                   fontStyle: r.italic ? 'italic' : 'normal',
                                   textDecoration: r.underline ? 'underline' : 'none',
-                                  color: r.color || '#0f172a',
+                                  color: r.color || (elem.backgroundColor ? '#0f172a' : 'inherit'),
                                   fontSize: r.fontSizePt
-                                    ? `clamp(12px, ${(r.fontSizePt / 24).toFixed(2)}rem, 36px)`
+                                    ? `clamp(11px, ${(r.fontSizePt / 22).toFixed(2)}rem, 36px)`
                                     : 'inherit'
                                 }}
                               >
@@ -981,29 +1207,100 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                     );
                   }
 
+                  // B. Render Picture / Image
                   if (elem.type === 'image') {
+                    const transformParts: string[] = [];
+                    if (elem.rotation) transformParts.push(`rotate(${elem.rotation}deg)`);
+                    if (elem.flipH) transformParts.push('scaleX(-1)');
+                    if (elem.flipV) transformParts.push('scaleY(-1)');
+
                     return (
                       <div
                         key={elem.id}
-                        className="absolute overflow-hidden flex items-center justify-center"
+                        className="absolute overflow-hidden flex items-center justify-center pointer-events-none select-none"
                         style={{
                           left: `${elem.left}%`,
                           top: `${elem.top}%`,
                           width: `${elem.width}%`,
-                          height: `${elem.height}%`
+                          height: `${elem.height}%`,
+                          zIndex: elem.zIndex,
+                          border: elem.borderColor ? `${elem.borderWidth || 1}px solid ${elem.borderColor}` : undefined,
+                          transform: transformParts.length > 0 ? transformParts.join(' ') : undefined
                         }}
                       >
                         <img
                           src={elem.imageUrl}
                           alt={elem.alt || 'صورة الشريحة'}
-                          className="w-full h-full object-contain pointer-events-none select-none"
+                          className="w-full h-full object-fill pointer-events-none select-none"
                           loading="lazy"
                         />
                       </div>
                     );
                   }
 
+                  // C. Render Connector Line / Arrow
+                  if (elem.type === 'connector') {
+                    // Line direction based on flipH and flipV
+                    const x1 = elem.flipH ? 100 : 0;
+                    const y1 = elem.flipV ? 100 : 0;
+                    const x2 = elem.flipH ? 0 : 100;
+                    const y2 = elem.flipV ? 0 : 100;
+                    const strokeColor = elem.color || '#4f81bd';
+                    const strokeWidth = elem.strokeWidth || 3;
+
+                    return (
+                      <div
+                        key={elem.id}
+                        className="absolute pointer-events-none"
+                        style={{
+                          left: `${elem.left}%`,
+                          top: `${elem.top}%`,
+                          width: `${elem.width}%`,
+                          height: `${elem.height}%`,
+                          zIndex: elem.zIndex,
+                          transform: elem.rotation ? `rotate(${elem.rotation}deg)` : undefined
+                        }}
+                      >
+                        <svg
+                          className="w-full h-full overflow-visible"
+                          viewBox="0 0 100 100"
+                          preserveAspectRatio="none"
+                        >
+                          <defs>
+                            <marker
+                              id={`arrow-${elem.id}`}
+                              viewBox="0 0 10 10"
+                              refX="6"
+                              refY="5"
+                              markerWidth="6"
+                              markerHeight="6"
+                              orient="auto-start-reverse"
+                            >
+                              <path d="M 0 1 L 10 5 L 0 9 z" fill={strokeColor} />
+                            </marker>
+                          </defs>
+                          <line
+                            x1={`${x1}%`}
+                            y1={`${y1}%`}
+                            x2={`${x2}%`}
+                            y2={`${y2}%`}
+                            stroke={strokeColor}
+                            strokeWidth={strokeWidth}
+                            strokeLinecap="round"
+                            markerEnd={elem.headArrow ? `url(#arrow-${elem.id})` : undefined}
+                          />
+                        </svg>
+                      </div>
+                    );
+                  }
+
+                  // D. Render Table
                   if (elem.type === 'table') {
+                    const transformParts: string[] = [];
+                    if (elem.rotation) transformParts.push(`rotate(${elem.rotation}deg)`);
+                    if (elem.flipH) transformParts.push('scaleX(-1)');
+                    if (elem.flipV) transformParts.push('scaleY(-1)');
+
                     return (
                       <div
                         key={elem.id}
@@ -1012,7 +1309,9 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                           left: `${elem.left}%`,
                           top: `${elem.top}%`,
                           width: `${elem.width}%`,
-                          height: `${elem.height}%`
+                          height: `${elem.height}%`,
+                          zIndex: elem.zIndex,
+                          transform: transformParts.length > 0 ? transformParts.join(' ') : undefined
                         }}
                       >
                         <table className="w-full h-full text-xs text-right border-collapse bg-white/95">
@@ -1020,7 +1319,11 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
                             {elem.rows.map((row, rIdx) => (
                               <tr key={rIdx} className="border-b border-slate-200">
                                 {row.map((cell, cIdx) => (
-                                  <td key={cIdx} className="p-1 border-l border-slate-200 text-slate-800">
+                                  <td
+                                    key={cIdx}
+                                    className="p-1 border-l border-slate-200 text-slate-800"
+                                    style={{ backgroundColor: cell.bg }}
+                                  >
                                     {cell.text}
                                   </td>
                                 ))}
