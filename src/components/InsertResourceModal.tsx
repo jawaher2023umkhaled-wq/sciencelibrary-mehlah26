@@ -148,6 +148,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
   const [uploadedStoragePath, setUploadedStoragePath] = useState<string | undefined>(undefined);
   const [isNewlyUploadedFile, setIsNewlyUploadedFile] = useState<boolean>(false);
   const [thumbnailUrl, setThumbnailUrl] = useState('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
+  const [selectedCoverFile, setSelectedCoverFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState('');
   const [fileType, setFileType] = useState('');
@@ -221,7 +222,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setUploadedFileUrl(resourceToEdit.fileUrl || resourceToEdit.url);
         setUploadedStoragePath(resourceToEdit.file_path);
         setTitle(resourceToEdit.title || '');
-        setAuthor(resourceToEdit.authorName || user?.displayName || '');
+        setAuthor(resourceToEdit.authorName || (resourceToEdit as any).author_name || (resourceToEdit as any).author || user?.displayName || '');
         setDescription(resourceToEdit.description || '');
         setGradeId(normalizeGradeId(resourceToEdit.gradeId, resourceToEdit.gradeName));
         setSubjectId(normalizeSubjectId(resourceToEdit.subjectId, resourceToEdit.subjectName));
@@ -239,6 +240,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setFileSize(resourceToEdit.fileSize || '');
         setFileType(resourceToEdit.fileType || '');
         setSelectedFile(null);
+        setSelectedCoverFile(null);
         setIsNewlyUploadedFile(false);
         setSupportingFiles(Array.isArray(resourceToEdit.supportingFiles) ? resourceToEdit.supportingFiles.filter(Boolean) : []);
         setVersion(resourceToEdit.version || 'الإصدار 1.0');
@@ -274,6 +276,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         setThumbnailUrl('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
         setHtmlContent('');
         setSelectedFile(null);
+        setSelectedCoverFile(null);
         setFileName('');
         setFileSize('');
         setFileType('');
@@ -361,7 +364,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     setSupportingFiles(supportingFiles.filter((_, i) => i !== idx));
   };
 
-  // Cover image file upload handler (converts to base64 Data URL)
+  // Cover image file upload handler (stores file for cloud upload on save, provides instant local preview)
   const handleCoverImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -369,14 +372,20 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       showToast('يرجى اختيار ملف صورة صالح (PNG, JPG, WebP)', 'warning');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setThumbnailUrl(reader.result);
-        showToast('تم رفع صورة الغلاف بنجاح', 'success');
-      }
-    };
-    reader.readAsDataURL(file);
+    setSelectedCoverFile(file);
+    try {
+      const previewUrl = URL.createObjectURL(file);
+      setThumbnailUrl(previewUrl);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setThumbnailUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    showToast('تم تحديد صورة الغلاف، وسيتم رفعها وحفظها في التخزين السحابي عند الحفظ', 'info');
   };
 
   /**
@@ -825,7 +834,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     const matchedTopic = (safeTopics || []).find(t => t && t.name === (topic || '').trim());
     const matchedType = (effectiveResourceTypes || []).find(t => t && t.name === resourceType);
 
-    const authorName = (author || '').trim() || resourceToEdit?.authorName || user.displayName || 'عضو هيئة التدريس';
+    const authorName = (author || '').trim() || resourceToEdit?.authorName || (resourceToEdit as any)?.author_name || (resourceToEdit as any)?.author || user.displayName || 'عضو هيئة التدريس';
     const authorId = (resourceToEdit?.authorId && isValidUuid(resourceToEdit.authorId)) ? resourceToEdit.authorId : user.id;
     const currentUserId = user.id;
 
@@ -851,7 +860,39 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
     const finalFileUrl = (isPdf || isPptx)
       ? (uploadedFileUrl || resourceToEdit?.fileUrl || undefined)
       : (finalHtml ? `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}` : (resourceToEdit?.fileUrl || undefined));
-    const effectiveThumb = thumbnailUrl || (resourceToEdit as any)?.thumbnail_url || (resourceToEdit as any)?.image_url || 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80';
+
+    // Resolve target resource ID for storage paths
+    const targetResourceId = resourceToEdit?.id || (isValidUuid(resourceId) ? resourceId : generateUuid());
+
+    // Resolve cover image:
+    // 1. If a new cover image file was chosen, upload to Supabase Storage in educational-resources
+    // 2. If editing and no new file was chosen, preserve the existing cover image URL
+    // 3. Otherwise, use valid HTTPS URL from state or default image (NEVER store Base64 in DB)
+    let finalCoverUrl = resourceToEdit
+      ? (resourceToEdit.thumbnailUrl || (resourceToEdit as any)?.thumbnail_url || (resourceToEdit as any)?.image_url || 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80')
+      : (thumbnailUrl && !thumbnailUrl.startsWith('blob:') && !thumbnailUrl.startsWith('data:') && thumbnailUrl.startsWith('http') ? thumbnailUrl.trim() : 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
+
+    if (selectedCoverFile) {
+      const ext = '.' + (selectedCoverFile.name.split('.').pop()?.toLowerCase() || 'jpg');
+      const safeCoverName = `cover_${Date.now()}${ext}`;
+      const coverUploadRes = await uploadResourceFile(
+        selectedCoverFile,
+        safeCoverName,
+        targetResourceId,
+        user?.id,
+        selectedCoverFile.type
+      );
+
+      if (coverUploadRes.success && coverUploadRes.publicUrl) {
+        finalCoverUrl = coverUploadRes.publicUrl;
+      } else {
+        setIsSubmitting(false);
+        setValidationError(`فشل رفع صورة الغلاف إلى التخزين السحابي: ${coverUploadRes.error || 'خطأ غير معروف في رفع الصورة'}`);
+        return;
+      }
+    } else if (thumbnailUrl && !thumbnailUrl.startsWith('blob:') && !thumbnailUrl.startsWith('data:') && thumbnailUrl.startsWith('http')) {
+      finalCoverUrl = thumbnailUrl.trim();
+    }
 
     const safeFileName = isPdf
       ? (fileName && fileName.toLowerCase().endsWith('.pdf') ? fileName : (selectedFile?.name || (safeTitle.toLowerCase().endsWith('.pdf') ? safeTitle : `${safeTitle}.pdf`)))
@@ -872,6 +913,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       authorName,
       authorId,
       author: authorName,
+      author_name: authorName,
       user_id: currentUserId,
       description: safeDesc,
       gradeId,
@@ -892,9 +934,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
       tags: Array.isArray(tags) ? tags : ['علوم', 'تفاعلي'],
       educationalObjectives: Array.isArray(educationalObjectives) ? educationalObjectives : [],
       scientificConcepts: Array.isArray(scientificConcepts) ? scientificConcepts : [],
-      thumbnailUrl: effectiveThumb,
-      thumbnail_url: effectiveThumb,
-      image_url: effectiveThumb,
+      thumbnailUrl: finalCoverUrl,
+      thumbnail_url: finalCoverUrl,
+      image_url: finalCoverUrl,
       fileName: safeFileName,
       fileSize: fileSize || (isPdf ? '1.5 MB' : '1.0 MB'),
       fileType: safeFileType,
@@ -944,21 +986,29 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
           }
         }
 
-        updateResource(resourceToEdit.id, {
+        const updateResult = await updateResource(resourceToEdit.id, {
           ...resourceDataRecord,
           url: finalUploadedUrl,
           fileUrl: finalUploadedUrl,
           file_url: finalUploadedUrl,
           download_url: finalUploadedUrl,
           file_path: finalStoragePath,
-          thumbnailUrl: effectiveThumb,
-          thumbnail_url: effectiveThumb,
-          image_url: effectiveThumb,
+          thumbnailUrl: finalCoverUrl,
+          thumbnail_url: finalCoverUrl,
+          image_url: finalCoverUrl,
+          authorName,
+          author: authorName,
           status: resolvedStatus,
           user_id: currentUserId,
           updatedAt: new Date().toISOString()
         });
-        onClose();
+
+        if (updateResult && updateResult.success) {
+          setSelectedCoverFile(null);
+          onClose();
+        } else {
+          setValidationError(updateResult?.error || 'تعذر تحديث المورد في قاعدة البيانات Supabase.');
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         setValidationError(`حدث خطأ أثناء حفظ التعديلات: ${msg}`);
@@ -1020,9 +1070,9 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
           file_url: finalUploadedUrl,
           download_url: finalUploadedUrl,
           file_path: finalStoragePath,
-          thumbnailUrl: effectiveThumb,
-          thumbnail_url: effectiveThumb,
-          image_url: effectiveThumb,
+          thumbnailUrl: finalCoverUrl,
+          thumbnail_url: finalCoverUrl,
+          image_url: finalCoverUrl,
           authorId,
           authorName,
           author: authorName,
@@ -1031,6 +1081,7 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
         });
 
         if (saved) {
+          setSelectedCoverFile(null);
           setIsNewlyUploadedFile(false);
           onClose();
         } else {
@@ -1569,7 +1620,10 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                     <input
                       type="url"
                       value={thumbnailUrl}
-                      onChange={(e) => setThumbnailUrl(e.target.value)}
+                      onChange={(e) => {
+                        setThumbnailUrl(e.target.value);
+                        setSelectedCoverFile(null);
+                      }}
                       placeholder="أو الصق رابط صورة الغلاف هنا..."
                       className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono"
                     />
@@ -1577,28 +1631,40 @@ export const InsertResourceModal: React.FC<InsertResourceModalProps> = ({
                       <span>نماذج معتمدة:</span>
                       <button
                         type="button"
-                        onClick={() => setThumbnailUrl('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80')}
+                        onClick={() => {
+                          setThumbnailUrl('https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
+                          setSelectedCoverFile(null);
+                        }}
                         className="text-sky-600 hover:underline font-semibold"
                       >
                         كيمياء
                       </button>
                       <button
                         type="button"
-                        onClick={() => setThumbnailUrl('https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?auto=format&fit=crop&w=600&q=80')}
+                        onClick={() => {
+                          setThumbnailUrl('https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?auto=format&fit=crop&w=600&q=80');
+                          setSelectedCoverFile(null);
+                        }}
                         className="text-sky-600 hover:underline font-semibold"
                       >
                         فيزياء
                       </button>
                       <button
                         type="button"
-                        onClick={() => setThumbnailUrl('https://images.unsplash.com/photo-1530026405186-ed1f139313f8?auto=format&fit=crop&w=600&q=80')}
+                        onClick={() => {
+                          setThumbnailUrl('https://images.unsplash.com/photo-1530026405186-ed1f139313f8?auto=format&fit=crop&w=600&q=80');
+                          setSelectedCoverFile(null);
+                        }}
                         className="text-sky-600 hover:underline font-semibold"
                       >
                         أحياء
                       </button>
                       <button
                         type="button"
-                        onClick={() => setThumbnailUrl('https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80')}
+                        onClick={() => {
+                          setThumbnailUrl('https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=600&q=80');
+                          setSelectedCoverFile(null);
+                        }}
                         className="text-sky-600 hover:underline font-semibold"
                       >
                         علوم عامة

@@ -57,7 +57,7 @@ interface ResourceContextType {
   toggleFavorite: (resourceId: string) => void;
   rateResource: (resourceId: string, score: number) => void;
   createResource: (resourceData: Omit<ResourceItem, 'id' | 'createdAt' | 'updatedAt' | 'ratingAverage' | 'ratingCount' | 'usageCount' | 'downloadCount'> & { id?: string }) => Promise<ResourceItem | null>;
-  updateResource: (id: string, updates: Partial<ResourceItem>) => void;
+  updateResource: (id: string, updates: Partial<ResourceItem>) => Promise<{ success: boolean; data?: ResourceItem | null; error?: string }>;
   startReview: (id: string) => void;
   reviewResource: (id: string, status: ResourceStatus, comment: string) => void;
   publishResource: (id: string) => void;
@@ -456,8 +456,11 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const updateResource = (id: string, updates: Partial<ResourceItem>) => {
+  const updateResource = async (id: string, updates: Partial<ResourceItem>): Promise<{ success: boolean; data?: ResourceItem | null; error?: string }> => {
     const previousResource = resources.find(r => r.id === id);
+    if (!previousResource) {
+      return { success: false, error: 'لم يتم العثور على المورد المطلوب تعديله.' };
+    }
 
     const effectiveThumb = updates.thumbnailUrl || (updates as any).thumbnail_url || (updates as any).image_url;
     const isPendingReview = updates.status === 'pending' || updates.status === 'submitted';
@@ -473,12 +476,8 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } : {})
     };
 
-    // 1. Keep reference to previous state for reliable rollback
-    if (!previousResource) return;
-
-    // 2. Check if this update contains database columns
     // Confirmed columns in public.resources:
-    // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at
+    // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at, author_name, thumbnail_url
     const hasDatabaseColumns =
       updates.title !== undefined ||
       updates.description !== undefined ||
@@ -494,62 +493,52 @@ export const ResourceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (updates as any).publishedAt !== undefined ||
       (updates as any).published_at !== undefined ||
       (updates as any).url !== undefined ||
-      (updates as any).download_url !== undefined;
+      (updates as any).download_url !== undefined ||
+      updates.authorName !== undefined ||
+      updates.author !== undefined ||
+      (updates as any).author_name !== undefined ||
+      updates.thumbnailUrl !== undefined ||
+      (updates as any).thumbnail_url !== undefined ||
+      (updates as any).image_url !== undefined;
 
-    // Optimistically update local React state
-    const optimisticResource: ResourceItem = {
-      ...previousResource,
-      ...normalizedUpdates,
-      ...(effectiveThumb ? {
-        thumbnailUrl: effectiveThumb,
-        thumbnail_url: effectiveThumb,
-        image_url: effectiveThumb
-      } : {})
-    };
-
-    setResources(prev => prev.map(r => r.id === id ? optimisticResource : r));
-    if (activeResource && activeResource.id === id) {
-      setActiveResource(optimisticResource);
-    }
-
-    // 3. Direct persistence to Supabase resources table if DB columns are modified
+    // Direct persistence to Supabase resources table if DB columns are modified
     if (hasDatabaseColumns) {
-      supabaseResourceService.updateResource(id, normalizedUpdates).then(({ data: savedRecord, savedToSupabase, error }) => {
-        if (savedToSupabase && savedRecord) {
-          setIsSupabaseLive(true);
-          const finalRecord: ResourceItem = {
-            ...savedRecord,
-            ...(effectiveThumb ? {
-              thumbnailUrl: effectiveThumb,
-              thumbnail_url: effectiveThumb,
-              image_url: effectiveThumb
-            } : {})
-          };
+      const { data: savedRecord, savedToSupabase, error } = await supabaseResourceService.updateResource(id, normalizedUpdates);
+      if (savedToSupabase && savedRecord) {
+        setIsSupabaseLive(true);
+        const finalRecord: ResourceItem = {
+          ...previousResource,
+          ...savedRecord,
+          ...normalizedUpdates
+        };
 
-          storageService.updateResource(id, finalRecord);
+        storageService.updateResource(id, finalRecord);
 
-          setResources(prev => prev.map(r => r.id === id ? { ...r, ...finalRecord } : r));
-          if (activeResource && activeResource.id === id) {
-            setActiveResource(prev => prev && prev.id === id ? { ...prev, ...finalRecord } : null);
-          }
-          refreshNotifications();
-          showToast('تم تحديث بيانات المورد في Supabase بنجاح', 'success');
-        } else {
-          console.error('Supabase update persistence failure:', error);
-          // Rollback optimistic React state on failure
-          setResources(prev => prev.map(r => r.id === id ? previousResource : r));
-          if (activeResource && activeResource.id === id) {
-            setActiveResource(previousResource);
-          }
-          storageService.updateResource(id, previousResource);
-          refreshNotifications();
-          const actionableError = error || 'لم يتم تحديث أي سجل في قاعدة البيانات (matched 0 rows). قد تكون سياسة RLS تمنع التحديث للحساب الحالي أو أن المورد غير موجود.';
-          showToast(`فشل تحديث المورد في Supabase: ${actionableError}`, 'error');
+        setResources(prev => prev.map(r => r.id === id ? finalRecord : r));
+        if (activeResource && activeResource.id === id) {
+          setActiveResource(finalRecord);
         }
-      });
+        refreshNotifications();
+        showToast('تم تحديث بيانات المورد في Supabase بنجاح', 'success');
+        return { success: true, data: finalRecord };
+      } else {
+        console.error('Supabase update persistence failure:', error);
+        const actionableError = error || 'لم يتم تحديث أي سجل في قاعدة البيانات (matched 0 rows). قد تكون سياسة RLS تمنع التحديث للحساب الحالي أو أن المورد غير موجود.';
+        showToast(`فشل تحديث المورد في Supabase: ${actionableError}`, 'error');
+        return { success: false, error: actionableError };
+      }
     } else {
+      const optimisticResource: ResourceItem = {
+        ...previousResource,
+        ...normalizedUpdates
+      };
       storageService.updateResource(id, optimisticResource);
+      setResources(prev => prev.map(r => r.id === id ? optimisticResource : r));
+      if (activeResource && activeResource.id === id) {
+        setActiveResource(optimisticResource);
+      }
       refreshNotifications();
+      return { success: true, data: optimisticResource };
     }
   };
 

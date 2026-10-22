@@ -116,8 +116,11 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
   const { gradeName } = normalizeGrade(item.gradeName || item.gradeId);
   const { subjectName } = normalizeSubject(item.subjectName || item.subjectId);
 
-  // Strictly write only confirmed production columns in public.resources:
-  // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at
+  // Strictly write confirmed production columns in public.resources:
+  // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at, author_name, thumbnail_url
+  const effectiveAuthorName = (item.authorName || item.author || (item as any).author_name || '').trim();
+  const effectiveThumbnailUrl = (item.thumbnailUrl || item.thumbnail_url || item.image_url || '').trim();
+
   const row: Record<string, unknown> = {
     id,
     title: item.title || 'مورد تعليمي بدون عنوان',
@@ -139,6 +142,14 @@ export function toSupabaseRow(item: ResourceItem): Record<string, unknown> {
 
   if (item.user_id && isValidUuid(item.user_id)) {
     row.user_id = item.user_id;
+  }
+
+  if (effectiveAuthorName) {
+    row.author_name = effectiveAuthorName;
+  }
+
+  if (effectiveThumbnailUrl && !effectiveThumbnailUrl.startsWith('data:image')) {
+    row.thumbnail_url = effectiveThumbnailUrl;
   }
 
   if (item.publishedAt) {
@@ -310,15 +321,24 @@ export function fromSupabaseRow(row: Record<string, unknown>): ResourceItem {
   );
 
   const rawThumbnailField = row.thumbnail_url || row.image_url || row.thumbnail;
-  const thumbnailUrl = rawThumbnailField
-    ? String(rawThumbnailField)
-    : (existingLocal?.thumbnailUrl || (isRawUrlImage ? rawUrl : 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80'));
+  const dbThumbnail = (rawThumbnailField && typeof rawThumbnailField === 'string' && rawThumbnailField.trim().length > 0)
+    ? rawThumbnailField.trim()
+    : undefined;
+
+  const thumbnailUrl = dbThumbnail
+    || (existingLocal?.thumbnailUrl && !existingLocal.thumbnailUrl.startsWith('data:image') ? existingLocal.thumbnailUrl : undefined)
+    || (isRawUrlImage ? rawUrl : 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80');
 
   const rowStatus = row.status ? String(row.status) : undefined;
   const status: ResourceStatus = (rowStatus as ResourceStatus) || existingLocal?.status || 'published';
   const userId = (row.user_id && isValidUuid(String(row.user_id))) ? String(row.user_id) : (existingLocal?.user_id && isValidUuid(existingLocal.user_id) ? existingLocal.user_id : undefined);
   const authorId = userId || (existingLocal?.authorId && isValidUuid(existingLocal.authorId) ? existingLocal.authorId : '');
-  const authorName = row.author_name ? String(row.author_name) : (existingLocal?.authorName || 'مكتبة العلوم الرقمية');
+  
+  // Authoritative author_name from Supabase public.resources
+  const dbAuthorName = (row.author_name && typeof row.author_name === 'string' && row.author_name.trim().length > 0)
+    ? row.author_name.trim()
+    : undefined;
+  const authorName = dbAuthorName || existingLocal?.authorName || 'مكتبة العلوم الرقمية';
   const publishedAt = row.published_at ? String(row.published_at) : (status === 'published' ? createdAt : undefined);
 
   const { gradeId, gradeName } = normalizeGrade(grade);
@@ -521,8 +541,11 @@ export const supabaseResourceService = {
         ? (item.publishedAt || now)
         : null;
 
-      // Confirmed database columns only:
-      // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at
+      // Confirmed database columns:
+      // id, title, description, subject, grade, type, url, download_url, created_at, status, user_id, published_at, author_name, thumbnail_url
+      const effectiveAuthorName = (item.authorName || item.author || (item as any).author_name || '').trim();
+      const effectiveThumbnailUrl = (item.thumbnailUrl || item.thumbnail_url || item.image_url || '').trim();
+
       const row: Record<string, unknown> = {
         id,
         title: item.title || 'مورد تعليمي بدون عنوان',
@@ -541,6 +564,14 @@ export const supabaseResourceService = {
         row.download_url = downloadUrl;
       }
 
+      if (effectiveAuthorName) {
+        row.author_name = effectiveAuthorName;
+      }
+
+      if (effectiveThumbnailUrl && !effectiveThumbnailUrl.startsWith('data:image')) {
+        row.thumbnail_url = effectiveThumbnailUrl;
+      }
+
       const { data, error, status } = await executeWithSchemaFallback(
         (targetRow) => supabase.from('resources').insert(targetRow).select().maybeSingle(),
         row
@@ -554,14 +585,14 @@ export const supabaseResourceService = {
 
       if (data) {
         const mapped = fromSupabaseRow(data as Record<string, unknown>);
-        if (item.thumbnailUrl) {
-          mapped.thumbnailUrl = item.thumbnailUrl;
-          mapped.thumbnail_url = item.thumbnailUrl;
-          mapped.image_url = item.thumbnailUrl;
+        if (effectiveThumbnailUrl && (!mapped.thumbnailUrl || mapped.thumbnailUrl.includes('images.unsplash.com'))) {
+          mapped.thumbnailUrl = effectiveThumbnailUrl;
+          mapped.thumbnail_url = effectiveThumbnailUrl;
+          mapped.image_url = effectiveThumbnailUrl;
         }
-        if (item.authorName) {
-          mapped.authorName = item.authorName;
-          mapped.author = item.authorName;
+        if (effectiveAuthorName && mapped.authorName === 'مكتبة العلوم الرقمية') {
+          mapped.authorName = effectiveAuthorName;
+          mapped.author = effectiveAuthorName;
         }
         return { data: mapped, savedToSupabase: true };
       }
@@ -641,6 +672,26 @@ export const supabaseResourceService = {
         partialRow.download_url = updates.download_url;
       } else if (partialRow.url && typeof partialRow.url === 'string' && partialRow.url.startsWith('http') && !partialRow.url.startsWith('https://images.unsplash.com')) {
         partialRow.download_url = partialRow.url;
+      }
+
+      // Author name support (maps to confirmed author_name column in Supabase public.resources)
+      const authorVal = updates.authorName !== undefined
+        ? updates.authorName
+        : (updates as any).author_name !== undefined
+        ? (updates as any).author_name
+        : (updates as any).author;
+      if (authorVal !== undefined && typeof authorVal === 'string' && authorVal.trim().length > 0) {
+        partialRow.author_name = authorVal.trim();
+      }
+
+      // Thumbnail URL support (maps to confirmed thumbnail_url column in Supabase public.resources)
+      const thumbVal = updates.thumbnailUrl !== undefined
+        ? updates.thumbnailUrl
+        : (updates as any).thumbnail_url !== undefined
+        ? (updates as any).thumbnail_url
+        : (updates as any).image_url;
+      if (thumbVal !== undefined && typeof thumbVal === 'string' && thumbVal.trim().length > 0 && !thumbVal.startsWith('data:image')) {
+        partialRow.thumbnail_url = thumbVal.trim();
       }
 
       // Status & published_at columns
