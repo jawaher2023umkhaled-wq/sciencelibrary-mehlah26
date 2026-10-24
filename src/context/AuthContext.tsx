@@ -33,6 +33,38 @@ export const isAuthorizedAdmin = (email?: string | null): boolean => {
   return clean === OFFICIAL_ADMIN_EMAIL;
 };
 
+/**
+ * Computes a strictly verified and trusted role for the given user profile.
+ * - Only the official admin email (sciencelibrary8@gmail.com) can ever hold administrator privileges.
+ * - Any unauthorized user claiming or spoofing administrator/admin role is forced to 'user'.
+ * - Regular users cannot self-escalate or bypass role security.
+ */
+export const computeTrustedRole = (userProfile: UserProfile | null): UserRole => {
+  if (!userProfile || !userProfile.email) return 'user';
+  const cleanEmail = userProfile.email.trim().toLowerCase();
+
+  // 1. Strict Administrator binding: Only sciencelibrary8@gmail.com can hold admin permissions
+  if (isAuthorizedAdmin(cleanEmail)) {
+    // If the authorized admin has explicitly chosen to preview user or reviewer view
+    if (userProfile.role === 'user' || userProfile.role === 'reviewer') {
+      return userProfile.role;
+    }
+    return 'administrator';
+  }
+
+  // 2. Strict Protection: Any non-authorized email can NEVER hold administrator or admin role
+  if (userProfile.role === 'administrator' || userProfile.role === 'admin') {
+    return 'user';
+  }
+
+  // 3. Reviewer role is only permitted for non-admin users if verified
+  if (userProfile.role === 'reviewer') {
+    return 'reviewer';
+  }
+
+  return 'user';
+};
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -110,6 +142,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const parsed = JSON.parse(stored);
                 // Ensure it has valid structure and is not an unverified mock
                 if (parsed && parsed.id && parsed.email) {
+                  // SECURITY HARDENING: Re-validate role strictly against verified identity
+                  parsed.role = computeTrustedRole(parsed);
+                  localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(parsed));
                   setUser(parsed);
                 } else {
                   setUser(null);
@@ -140,6 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         const profile = mapSupabaseUserToProfile(session.user);
+        profile.role = computeTrustedRole(profile);
         setUser(profile);
         try {
           localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(profile));
@@ -196,6 +232,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (data?.user) {
         const profile = mapSupabaseUserToProfile(data.user);
+        profile.role = computeTrustedRole(profile);
         setUser(profile);
         localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(profile));
         return { success: true };
@@ -296,25 +333,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const switchRole = (newRole: UserRole) => {
     if (!user) return;
-    const updated = { ...user, role: newRole };
+    // SECURITY HARDENING: Non-admin users are strictly forbidden from switching roles
+    if (!isAuthorizedAdmin(user.email)) {
+      console.warn('تنبيه أمني: محاولة غير مصرح بها لتبديل الأدوار تم حظرها.');
+      return;
+    }
+    const safeRole: UserRole = isAuthorizedAdmin(user.email) ? newRole : 'user';
+    const updated = { ...user, role: safeRole };
     setUser(updated);
     setUsers(prev => prev.map(u => (u.id === user.id ? updated : u)));
     localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(updated));
   };
 
   const updateUserRole = (userId: string, newRole: UserRole) => {
+    // SECURITY HARDENING: Only the authorized official admin can modify roles
+    if (!user || !isAuthorizedAdmin(user.email)) {
+      console.warn('تنبيه أمني: لا يمكن تعديل أدوار المستخدمين إلا من حساب المديرة الرسمي.');
+      return;
+    }
+
     setUsers(prev => prev.map(u => {
       if (u.id === userId) {
-        return { ...u, role: newRole };
+        const targetEmail = (u.email || '').trim().toLowerCase();
+        // Administrator role is exclusively reserved for OFFICIAL_ADMIN_EMAIL
+        const safeRole: UserRole = isAuthorizedAdmin(targetEmail)
+          ? 'administrator'
+          : (newRole === 'administrator' || newRole === 'admin' ? 'user' : newRole);
+        return { ...u, role: safeRole };
       }
       return u;
     }));
+
     if (user && user.id === userId) {
-      const updated = { ...user, role: newRole };
+      const safeRole: UserRole = isAuthorizedAdmin(user.email)
+        ? newRole
+        : (newRole === 'administrator' || newRole === 'admin' ? 'user' : newRole);
+      const updated = { ...user, role: safeRole };
       setUser(updated);
       localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(updated));
     }
   };
+
+  const trustedRole = computeTrustedRole(user);
 
   return (
     <AuthContext.Provider
@@ -322,7 +382,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isAuthenticated: !!user,
         isLoadingAuth,
-        role: user?.role || 'user',
+        role: trustedRole,
         login,
         register,
         googleSignIn,

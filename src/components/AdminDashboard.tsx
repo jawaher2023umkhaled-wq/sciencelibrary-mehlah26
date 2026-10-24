@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useResources } from '../context/ResourceContext';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, isAuthorizedAdmin } from '../context/AuthContext';
 import { GRADES, SUBJECTS, RESOURCE_TYPES } from '../data/initialData';
 import { UserRole, isAdminRole, getRoleArabicLabel, GradeItem, SubjectItem, UnitItem, TopicItem, CurriculumItem, ResourceItem, isResourceInteractive } from '../types';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -1191,7 +1191,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       >
                         <option value="user">المستخدم (User)</option>
                         <option value="reviewer">المراجع (Reviewer)</option>
-                        <option value="administrator">المدير (Administrator)</option>
+                        {isAuthorizedAdmin(u.email) && (
+                          <option value="administrator">المدير (Administrator)</option>
+                        )}
                       </select>
                     </td>
                   </tr>

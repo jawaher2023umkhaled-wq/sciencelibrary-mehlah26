@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, isAuthorizedAdmin } from '../context/AuthContext';
 import { useResources } from '../context/ResourceContext';
 import { isAdminRole, getRoleArabicLabel } from '../types';
 import {
@@ -322,47 +322,61 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <p className="text-[11px] text-cyan-600 mt-1 font-medium truncate">{user.school}</p>
                       </div>
 
-                      {/* Role Switcher for instant testing */}
-                      <div className="px-3 py-2 bg-slate-50 mx-2 my-2 rounded-xl border border-slate-200/70">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-xs font-bold text-slate-700">الصلاحية:</span>
+                      {/* Role Badge (Read-only for regular users; preview toggle strictly for official admin) */}
+                      <div className="px-3 py-2 bg-slate-50 mx-2 my-2 rounded-xl border border-slate-200/70 flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">الصلاحية:</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                            isAdminRole(role)
+                              ? 'bg-purple-100 text-purple-700'
+                              : role === 'reviewer'
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-sky-100 text-sky-700'
+                          }`}>
+                            {getRoleArabicLabel(role)}
+                          </span>
+                          {isAuthorizedAdmin(user.email) && (
+                            <button
+                              onClick={() => setRoleSwitcherOpen(!roleSwitcherOpen)}
+                              className="text-[10px] text-purple-600 hover:underline font-semibold cursor-pointer"
+                              title="معاينة الواجهة بدور آخر (مخصص للمديرة الرسمية فقط)"
+                            >
+                              {roleSwitcherOpen ? 'إغلاق المعاينة' : 'معاينة دور'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Role Preview switcher - STRICTLY restricted to official admin */}
+                      {isAuthorizedAdmin(user.email) && roleSwitcherOpen && (
+                        <div className="px-3 py-2 bg-purple-50/50 mx-2 mb-2 rounded-xl border border-purple-200/70 flex flex-col gap-1">
+                          <span className="text-[10px] font-bold text-purple-800 mb-1">معاينة واجهة المنصة برتبة:</span>
                           <button
-                            onClick={() => setRoleSwitcherOpen(!roleSwitcherOpen)}
-                            className="text-[11px] text-sky-600 hover:underline font-semibold cursor-pointer"
+                            onClick={() => { switchRole('user'); setUserDropdownOpen(false); }}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg text-right font-medium transition-colors ${
+                              role === 'user' ? 'bg-sky-500 text-white' : 'hover:bg-slate-200 text-slate-700'
+                            }`}
                           >
-                            تبديل الدور
+                            👤 مستخدم عادي (User)
+                          </button>
+                          <button
+                            onClick={() => { switchRole('reviewer'); setUserDropdownOpen(false); }}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg text-right font-medium transition-colors ${
+                              role === 'reviewer' ? 'bg-amber-500 text-white' : 'hover:bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            🔍 مراجع أكاديمي (Reviewer)
+                          </button>
+                          <button
+                            onClick={() => { switchRole('administrator'); setUserDropdownOpen(false); }}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg text-right font-medium transition-colors ${
+                              isAdminRole(role) ? 'bg-purple-600 text-white' : 'hover:bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            ⚙️ مدير النظام (Administrator)
                           </button>
                         </div>
-                        
-                        {roleSwitcherOpen && (
-                          <div className="flex flex-col gap-1 mt-2">
-                            <button
-                              onClick={() => { switchRole('user'); setUserDropdownOpen(false); }}
-                              className={`text-xs px-2.5 py-1.5 rounded-lg text-right font-medium transition-colors ${
-                                role === 'user' ? 'bg-sky-500 text-white' : 'hover:bg-slate-200 text-slate-700'
-                              }`}
-                            >
-                              👤 المستخدم (User)
-                            </button>
-                            <button
-                              onClick={() => { switchRole('reviewer'); setUserDropdownOpen(false); }}
-                              className={`text-xs px-2.5 py-1.5 rounded-lg text-right font-medium transition-colors ${
-                                role === 'reviewer' ? 'bg-amber-500 text-white' : 'hover:bg-slate-200 text-slate-700'
-                              }`}
-                            >
-                              🔍 المراجع (Reviewer)
-                            </button>
-                            <button
-                              onClick={() => { switchRole('administrator'); setUserDropdownOpen(false); }}
-                              className={`text-xs px-2.5 py-1.5 rounded-lg text-right font-medium transition-colors ${
-                                isAdminRole(role) ? 'bg-purple-600 text-white' : 'hover:bg-slate-200 text-slate-700'
-                              }`}
-                            >
-                              ⚙️ المدير (Administrator)
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      )}
 
                       <div className="px-2 py-1">
                         <button
